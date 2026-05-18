@@ -16,28 +16,33 @@ const formatPercent = (value) => {
   return (value * 100).toFixed(2) + '%';
 };
 
-// 🌟 강력한 Fetch 함수: 야후 파이낸스 에러 우회 및 이중 프록시 처리
+// 🌟 초경량 스마트 패치 함수: 빠른 프록시를 우선 시도하고 캐싱 방지 필터 적용
 const fetchYahooAPI = async (targetUrl) => {
-  const cacheBuster = targetUrl.includes('?') ? `&_=${Date.now()}` : `?_=${Date.now()}`;
+  const cacheBuster = `&nocache=${Date.now()}`;
   const finalUrl = targetUrl + cacheBuster;
   
   try {
-    // 1순위: 브라우저 CORS를 가장 완벽하게 피하는 allorigins /get 방식
-    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(finalUrl)}`);
-    const data = await res.json();
-    if (data && data.contents) {
-      return JSON.parse(data.contents); // 텍스트로 넘어온 JSON을 객체로 변환
+    // 1순위: 가장 신속하게 데이터를 반환하는 corsproxy.io 직접 호출
+    const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(finalUrl)}`);
+    if (res.ok) {
+      const text = await res.text();
+      return JSON.parse(text);
     }
   } catch (e) {
-    console.warn('1순위 프록시 실패, 2순위로 재시도합니다.', e);
+    console.warn('Primary fast proxy failed, switching to backup...', e);
   }
 
   try {
-    // 2순위: corsproxy.io 우회
-    const res2 = await fetch(`https://corsproxy.io/?${encodeURIComponent(finalUrl)}`);
-    return await res2.json();
+    // 2순위: 100% 신뢰할 수 있는 allorigins 우회 처리
+    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(finalUrl)}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.contents) {
+        return JSON.parse(data.contents);
+      }
+    }
   } catch (err) {
-    console.error('모든 API 우회 요청에 실패했습니다.', err);
+    console.error('모든 프록시 호출에 실패했습니다.', err);
     return null;
   }
 };
@@ -108,9 +113,10 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // --- 2. 야후 파이낸스 종목 검색 API ---
+  // --- 2. 야후 파이낸스 종목 검색 API (티커 검색 강화 및 딜레이 단축) ---
   useEffect(() => {
-    if (searchQuery.length < 2 || selectedStock?.name === searchQuery) {
+    // 최소 검색 글자수를 1글자로 낮추어 단일 문자 티커(T, F 등)도 즉시 검색 가능하게 수정
+    if (searchQuery.length < 1 || selectedStock?.name === searchQuery) {
       setSearchResults([]);
       return;
     }
@@ -123,7 +129,8 @@ export default function App() {
         
         if (data && data.quotes) {
           const validQuotes = data.quotes
-            .filter(q => q.symbol && ['EQUITY', 'ETF', 'MUTUALFUND', 'INDEX'].includes(q.quoteType))
+            // 필터링 완화: quoteType 제한을 완전히 없애서 Symbol이 있는 모든 상품(ETF, 펀드 등)이 무조건 검색되도록 수정
+            .filter(q => q.symbol)
             .map(q => {
               let currency = 'USD';
               if (q.symbol.endsWith('.KS') || q.symbol.endsWith('.KQ')) currency = 'KRW';
@@ -142,12 +149,12 @@ export default function App() {
       } finally {
         setIsSearching(false);
       }
-    }, 300);
+    }, 150); // 반응 대기시간을 150ms로 단축하여 극적인 타자 반응 속도 구현
 
     return () => clearTimeout(timer);
   }, [searchQuery, selectedStock]);
 
-  // --- 3. 🌟 보유 종목 실제 주가 불러오기 API (차트 우회 로직 추가) ---
+  // --- 3. 보유 종목 실제 주가 불러오기 API (초고속 Spark API 적용) ---
   useEffect(() => {
     const fetchPortfolioPrices = async () => {
       if (portfolio.length === 0) return;
@@ -156,20 +163,21 @@ export default function App() {
       const symbols = portfolio.map(p => p.id).join(',');
 
       try {
-        // 첫 번째 시도: 일반 Quote API 
-        const targetUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
-        const data = await fetchYahooAPI(targetUrl);
+        const sparkUrl = `https://query2.finance.yahoo.com/v7/finance/spark?symbols=${symbols}&range=1d&interval=5m`;
+        const data = await fetchYahooAPI(sparkUrl);
         
-        if (data && data.quoteResponse && data.quoteResponse.result) {
-          data.quoteResponse.result.forEach(q => {
-            if (q.regularMarketPrice) newPrices[q.symbol] = q.regularMarketPrice;
+        if (data && data.spark && data.spark.result) {
+          data.spark.result.forEach(item => {
+            const price = item.response?.[0]?.meta?.regularMarketPrice;
+            if (price) {
+              newPrices[item.symbol] = price;
+            }
           });
         }
       } catch(e) {
-        console.warn('Quote API 요청 실패, 차트 API로 개별 우회 시도합니다.');
+        console.warn('Spark API 호출 실패, 예비 로직(Chart API)으로 전환합니다.');
       }
 
-      // 두 번째 시도: Quote API에서 가격을 못 가져온 종목(보안에 막힌 종목)만 골라 차트 API로 개별 우회 조회
       const missingSymbols = portfolio.filter(p => !newPrices[p.id]);
       
       if (missingSymbols.length > 0) {
@@ -180,19 +188,18 @@ export default function App() {
             const price = chartData?.chart?.result?.[0]?.meta?.regularMarketPrice;
             if (price) newPrices[stock.id] = price;
           } catch(err) {
-            console.error(`${stock.id} 가격 조회 최종 실패`, err);
+            console.error(`${stock.id} 최종 조회 실패`, err);
           }
         }));
       }
 
-      // 하나라도 가격을 받아왔다면 상태 업데이트 (화면 리렌더링 및 평가손익 계산 촉발)
       if (Object.keys(newPrices).length > 0) {
         setMarketPrices(prev => ({ ...prev, ...newPrices }));
       }
     };
 
     fetchPortfolioPrices(); 
-    const interval = setInterval(fetchPortfolioPrices, 15000); // 15초마다 갱신
+    const interval = setInterval(fetchPortfolioPrices, 15000); 
     return () => clearInterval(interval);
   }, [portfolio]);
 
@@ -244,7 +251,6 @@ export default function App() {
     setIsDropdownOpen(false);
     setInputAvgPrice('');
     
-    // 선택 즉시 단가 불러오기 (여기도 확실한 v8 Chart API 적용)
     try {
       const targetUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${stock.id}?interval=1d&range=1d`;
       const data = await fetchYahooAPI(targetUrl);
@@ -386,7 +392,7 @@ export default function App() {
                     <input 
                       type="text" 
                       className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
-                      placeholder="삼성전자, 애플 검색" 
+                      placeholder="삼성전자, AAPL, TLT, VWO 검색" 
                       value={searchQuery} 
                       onChange={(e) => { 
                         setSearchQuery(e.target.value); 
@@ -398,7 +404,7 @@ export default function App() {
                   </div>
                   
                   {/* 검색 결과 드롭다운 */}
-                  {isDropdownOpen && searchQuery.length >= 2 && (
+                  {isDropdownOpen && searchQuery.length >= 1 && (
                     <ul className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                       {isSearching ? (
                         <li className="px-4 py-6 text-sm text-gray-500 flex justify-center items-center">
@@ -440,7 +446,7 @@ export default function App() {
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold text-gray-900 flex items-center"><PieChart className="w-5 h-5 mr-2 text-indigo-500" /> 보유 종목 현황</h2>
-                <div className="text-xs text-gray-400">15초마다 자동 갱신</div>
+                <div className="text-xs text-gray-400 font-medium text-indigo-600">실시간 데이터 갱신 중</div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left whitespace-nowrap">
@@ -457,7 +463,6 @@ export default function App() {
                   </thead>
                   <tbody>
                     {portfolio.length === 0 ? <tr><td colSpan="7" className="px-4 py-8 text-center text-gray-400">보유 종목이 없습니다.</td></tr> : portfolio.map(stock => {
-                      // marketPrices에 없으면 임시로 평단가를 할당하지만, 로딩 인디케이터 용도로 사용
                       const isPriceLoaded = marketPrices[stock.id] !== undefined;
                       const currentPrice = marketPrices[stock.id] || stock.avgPrice;
                       const isUSD = stock.currency === 'USD';
@@ -539,7 +544,15 @@ export default function App() {
                         
                         return (
                           <tr key={`rebal-${stock.id}`} className="border-b border-gray-100">
-                            <td className="px-4 py-3 font-medium text-gray-900">{stock.name}</td>
+                            {/* 리밸런싱 계산기 종목명 아래에 티커(ID) 표시 */}
+                            <td className="px-4 py-3 font-medium text-gray-900">
+                              <div className="flex flex-col">
+                                <span>{stock.name}</span>
+                                <span className="text-[10px] text-gray-400 font-normal mt-0.5">
+                                  {stock.id.replace('.KS', '').replace('.KQ', '')}
+                                </span>
+                              </div>
+                            </td>
                             <td className="px-4 py-3 text-center">
                               <input type="number" className="w-20 px-2 py-1 border border-gray-200 rounded text-center focus:ring-1 focus:ring-indigo-500 outline-none" value={targetWeights[stock.id] ?? ''} onChange={(e) => handleTargetWeightChange(stock.id, e.target.value)} min="0" max="100" />
                             </td>
