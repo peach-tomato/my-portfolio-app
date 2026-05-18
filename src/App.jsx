@@ -16,6 +16,32 @@ const formatPercent = (value) => {
   return (value * 100).toFixed(2) + '%';
 };
 
+// 🌟 강력한 Fetch 함수: 야후 파이낸스 에러 우회 및 이중 프록시 처리
+const fetchYahooAPI = async (targetUrl) => {
+  const cacheBuster = targetUrl.includes('?') ? `&_=${Date.now()}` : `?_=${Date.now()}`;
+  const finalUrl = targetUrl + cacheBuster;
+  
+  try {
+    // 1순위: 브라우저 CORS를 가장 완벽하게 피하는 allorigins /get 방식
+    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(finalUrl)}`);
+    const data = await res.json();
+    if (data && data.contents) {
+      return JSON.parse(data.contents); // 텍스트로 넘어온 JSON을 객체로 변환
+    }
+  } catch (e) {
+    console.warn('1순위 프록시 실패, 2순위로 재시도합니다.', e);
+  }
+
+  try {
+    // 2순위: corsproxy.io 우회
+    const res2 = await fetch(`https://corsproxy.io/?${encodeURIComponent(finalUrl)}`);
+    return await res2.json();
+  } catch (err) {
+    console.error('모든 API 우회 요청에 실패했습니다.', err);
+    return null;
+  }
+};
+
 export default function App() {
   // --- 상태 관리 ---
   const [marketPrices, setMarketPrices] = useState({});
@@ -78,7 +104,7 @@ export default function App() {
       }
     };
     fetchExchangeRate();
-    const interval = setInterval(fetchExchangeRate, 60 * 60 * 1000); // 1시간마다 갱신
+    const interval = setInterval(fetchExchangeRate, 60 * 60 * 1000); 
     return () => clearInterval(interval);
   }, []);
 
@@ -92,18 +118,13 @@ export default function App() {
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        // 브라우저 CORS 에러 우회를 위해 allorigins 프록시 사용
-        const targetUrl = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(searchQuery)}&quotesCount=8&newsCount=0`;
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+        const targetUrl = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(searchQuery)}&quotesCount=10&newsCount=0`;
+        const data = await fetchYahooAPI(targetUrl);
         
-        const res = await fetch(proxyUrl);
-        const data = await res.json();
-        
-        if (data.quotes) {
+        if (data && data.quotes) {
           const validQuotes = data.quotes
-            .filter(q => q.quoteType === 'EQUITY' || q.quoteType === 'ETF')
+            .filter(q => q.symbol && ['EQUITY', 'ETF', 'MUTUALFUND', 'INDEX'].includes(q.quoteType))
             .map(q => {
-              // 한국 주식(.KS, .KQ)은 원화로, 나머지는 달러로 처리
               let currency = 'USD';
               if (q.symbol.endsWith('.KS') || q.symbol.endsWith('.KQ')) currency = 'KRW';
               
@@ -121,38 +142,57 @@ export default function App() {
       } finally {
         setIsSearching(false);
       }
-    }, 500); // 사용자가 입력을 멈추고 0.5초 뒤에 검색 시작 (API 호출 최소화)
+    }, 300);
 
     return () => clearTimeout(timer);
   }, [searchQuery, selectedStock]);
 
-  // --- 3. 보유 종목 실제 주가 불러오기 API ---
+  // --- 3. 🌟 보유 종목 실제 주가 불러오기 API (차트 우회 로직 추가) ---
   useEffect(() => {
     const fetchPortfolioPrices = async () => {
       if (portfolio.length === 0) return;
       
+      let newPrices = {};
       const symbols = portfolio.map(p => p.id).join(',');
+
       try {
-        const targetUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&_=${Date.now()}`;
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-        
-        const res = await fetch(proxyUrl);
-        const data = await res.json();
+        // 첫 번째 시도: 일반 Quote API 
+        const targetUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols}`;
+        const data = await fetchYahooAPI(targetUrl);
         
         if (data && data.quoteResponse && data.quoteResponse.result) {
-          const newPrices = {};
           data.quoteResponse.result.forEach(q => {
-            newPrices[q.symbol] = q.regularMarketPrice;
+            if (q.regularMarketPrice) newPrices[q.symbol] = q.regularMarketPrice;
           });
-          setMarketPrices(prev => ({ ...prev, ...newPrices }));
         }
       } catch(e) {
-        console.error('현재가 불러오기 실패:', e);
+        console.warn('Quote API 요청 실패, 차트 API로 개별 우회 시도합니다.');
+      }
+
+      // 두 번째 시도: Quote API에서 가격을 못 가져온 종목(보안에 막힌 종목)만 골라 차트 API로 개별 우회 조회
+      const missingSymbols = portfolio.filter(p => !newPrices[p.id]);
+      
+      if (missingSymbols.length > 0) {
+        await Promise.all(missingSymbols.map(async (stock) => {
+          try {
+            const chartUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${stock.id}?interval=1d&range=1d`;
+            const chartData = await fetchYahooAPI(chartUrl);
+            const price = chartData?.chart?.result?.[0]?.meta?.regularMarketPrice;
+            if (price) newPrices[stock.id] = price;
+          } catch(err) {
+            console.error(`${stock.id} 가격 조회 최종 실패`, err);
+          }
+        }));
+      }
+
+      // 하나라도 가격을 받아왔다면 상태 업데이트 (화면 리렌더링 및 평가손익 계산 촉발)
+      if (Object.keys(newPrices).length > 0) {
+        setMarketPrices(prev => ({ ...prev, ...newPrices }));
       }
     };
 
-    fetchPortfolioPrices(); // 앱 시작 시 최초 호출
-    const interval = setInterval(fetchPortfolioPrices, 15000); // 15초마다 주가 갱신
+    fetchPortfolioPrices(); 
+    const interval = setInterval(fetchPortfolioPrices, 15000); // 15초마다 갱신
     return () => clearInterval(interval);
   }, [portfolio]);
 
@@ -161,7 +201,6 @@ export default function App() {
     let invested = 0;
     let assets = 0;
     portfolio.forEach(item => {
-      // 주가를 아직 못 불러왔을 경우, 사용자가 입력한 평단가로 임시 계산
       const currentPrice = marketPrices[item.id] || item.avgPrice;
       const rate = item.currency === 'USD' ? exchangeRate : 1;
       
@@ -203,14 +242,13 @@ export default function App() {
     setSelectedStock(stock);
     setSearchQuery(stock.name);
     setIsDropdownOpen(false);
+    setInputAvgPrice('');
     
-    // 종목 선택 시 해당 종목의 실시간 주가를 1회 불러와서 입력창에 자동으로 채워줌
+    // 선택 즉시 단가 불러오기 (여기도 확실한 v8 Chart API 적용)
     try {
-      const targetUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${stock.id}`;
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-      const res = await fetch(proxyUrl);
-      const data = await res.json();
-      const price = data.quoteResponse.result[0]?.regularMarketPrice;
+      const targetUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${stock.id}?interval=1d&range=1d`;
+      const data = await fetchYahooAPI(targetUrl);
+      const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
       if (price) {
         setInputAvgPrice(price.toString());
       }
@@ -400,7 +438,10 @@ export default function App() {
 
             {/* 보유 종목 리스트 */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center"><PieChart className="w-5 h-5 mr-2 text-indigo-500" /> 보유 종목 현황</h2>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-bold text-gray-900 flex items-center"><PieChart className="w-5 h-5 mr-2 text-indigo-500" /> 보유 종목 현황</h2>
+                <div className="text-xs text-gray-400">15초마다 자동 갱신</div>
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left whitespace-nowrap">
                   <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-y border-gray-200">
@@ -416,9 +457,12 @@ export default function App() {
                   </thead>
                   <tbody>
                     {portfolio.length === 0 ? <tr><td colSpan="7" className="px-4 py-8 text-center text-gray-400">보유 종목이 없습니다.</td></tr> : portfolio.map(stock => {
+                      // marketPrices에 없으면 임시로 평단가를 할당하지만, 로딩 인디케이터 용도로 사용
+                      const isPriceLoaded = marketPrices[stock.id] !== undefined;
                       const currentPrice = marketPrices[stock.id] || stock.avgPrice;
                       const isUSD = stock.currency === 'USD';
                       const rate = isUSD ? exchangeRate : 1;
+                      
                       const totalCostKRW = stock.quantity * stock.avgPrice * rate;
                       const currentValueKRW = stock.quantity * currentPrice * rate;
                       const profitKRW = currentValueKRW - totalCostKRW;
@@ -440,8 +484,14 @@ export default function App() {
                             {isUSD && <div className="text-[11px] text-gray-400 mt-0.5">({formatCurrency(stock.avgPrice * rate)})</div>}
                           </td>
                           <td className="px-4 py-4 text-right">
-                            <span className="font-semibold bg-gray-100 px-2 py-1 rounded">{isUSD ? formatUSD(currentPrice) : formatCurrency(currentPrice)}</span>
-                            {isUSD && <div className="text-[11px] text-gray-400 mt-1">({formatCurrency(currentPrice * rate)})</div>}
+                            {!isPriceLoaded ? (
+                               <span className="text-xs text-gray-400 flex justify-end items-center"><Loader2 className="w-3 h-3 animate-spin mr-1"/>조회중</span>
+                            ) : (
+                              <>
+                                <span className="font-semibold bg-gray-100 px-2 py-1 rounded">{isUSD ? formatUSD(currentPrice) : formatCurrency(currentPrice)}</span>
+                                {isUSD && <div className="text-[11px] text-gray-400 mt-1">({formatCurrency(currentPrice * rate)})</div>}
+                              </>
+                            )}
                           </td>
                           <td className={`px-4 py-4 text-right font-bold ${getProfitColor(profitKRW)}`}>
                             {profitKRW > 0 ? '+' : ''}{formatCurrency(profitKRW)}
