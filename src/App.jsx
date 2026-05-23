@@ -445,7 +445,27 @@ export default function App() {
     return dividendsMap[activeAccountId] || [];
   }, [dividendsMap, activeAccountId, accounts]);
 
-  // 🌟 예상 연간 배당 현황 통계 연산
+  // 💡 [중요 버그 수정 코멘트]
+  // 기존에는 자산 총합 계산(useMemo)이 배당금 연산 블록(dividendSummary) 아래에 있어서,
+  // 배당금 계산 시 totalAssets를 읽을 수 없어 ReferenceError(하얀 화면)가 발생했습니다.
+  // 자산 현황 요약 코드를 배당금 계산 블록보다 먼저 선언하여 이 의존성 TDZ 버그를 완벽하게 차단했습니다.
+  const { totalInvested, totalAssets, totalProfit } = useMemo(() => {
+    let invested = 0;
+    let assets = 0;
+    
+    currentPortfolio.forEach(item => {
+      const currentPrice = marketPrices[item.id] || item.avgPrice;
+      const rate = item.currency === 'USD' ? exchangeRate : 1;
+      
+      invested += (item.quantity * item.avgPrice * rate);
+      assets += (item.quantity * currentPrice * rate);
+    });
+    return { totalInvested: invested, totalAssets: assets, totalProfit: assets - invested };
+  }, [currentPortfolio, marketPrices, exchangeRate]);
+
+  const totalROI = totalInvested > 0 ? totalProfit / totalInvested : 0;
+
+  // 🌟 예상 연간 배당 현황 통계 연산 (이제 totalAssets가 상단에 선언되어 있어 안전하게 정상 실행됩니다)
   const dividendSummary = useMemo(() => {
     let estAnnualDividendKRW = 0;
     
@@ -482,23 +502,6 @@ export default function App() {
       .sort((a, b) => a.month.localeCompare(b.month))
       .slice(-12); 
   }, [currentDividends]);
-
-  // 자산 현황 요약용 (원금, 평가액, 손익액 계산)
-  const { totalInvested, totalAssets, totalProfit } = useMemo(() => {
-    let invested = 0;
-    let assets = 0;
-    
-    currentPortfolio.forEach(item => {
-      const currentPrice = marketPrices[item.id] || item.avgPrice;
-      const rate = item.currency === 'USD' ? exchangeRate : 1;
-      
-      invested += (item.quantity * item.avgPrice * rate);
-      assets += (item.quantity * currentPrice * rate);
-    });
-    return { totalInvested: invested, totalAssets: assets, totalProfit: assets - invested };
-  }, [currentPortfolio, marketPrices, exchangeRate]);
-
-  const totalROI = totalInvested > 0 ? totalProfit / totalInvested : 0;
 
   // 리밸런싱 세팅 연산
   const setWeightsToCurrent = () => {
@@ -817,6 +820,9 @@ export default function App() {
     setHistories(prev => ({ ...prev, [activeAccountId]: updatedHist }));
   };
 
+  // 등락 컬러 조건문
+  const getProfitColor = (value) => value > 0 ? 'text-red-500' : value < 0 ? 'text-blue-500' : 'text-gray-600';
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 p-4 md:p-8 font-sans">
       <div className="max-w-5xl mx-auto space-y-6">
@@ -897,7 +903,7 @@ export default function App() {
                       <span>이름 수정</span>
                     </button>
                     <button
-                      onClick={handleDeleteAccount} // 🌟 'DeleteAccount' -> 'handleDeleteAccount' 오타 전면 교정 완료
+                      onClick={handleDeleteAccount} // 🌟 계좌 삭제 시 'DeleteAccount'가 아닌 'handleDeleteAccount'가 실행되도록 완벽히 교정되었습니다.
                       className="flex items-center space-x-1 px-2.5 py-1.5 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
