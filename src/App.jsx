@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Plus, Trash2, TrendingUp, TrendingDown, Calendar, PieChart, Activity, RefreshCw, Scale, Loader2, FolderPlus, Edit3, Check, X, CreditCard, Coins } from 'lucide-react';
+import { Search, Plus, Trash2, TrendingUp, TrendingDown, Calendar, PieChart, Activity, RefreshCw, Scale, Loader2, FolderPlus, Edit3, Check, X, CreditCard, Coins, CheckCircle2 } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 // =========================================================================
@@ -174,7 +174,7 @@ export default function App() {
     };
   });
 
-  // 🌟 계좌별 실제 배당금 수령 기록 보관용 맵 데이터베이스
+  // 계좌별 실제 배당금 수령 기록 보관용 맵 데이터베이스
   const [dividendsMap, setDividendsMap] = useState(() => {
     const saved = localStorage.getItem('dividendsMap');
     if (saved) return JSON.parse(saved);
@@ -183,6 +183,16 @@ export default function App() {
       'acc-pension': []
     };
   });
+
+  // 🌟 [추가 상태] 자동 배당금 수령 동기화 엔진 상태
+  const [isSyncingDividends, setIsSyncingDividends] = useState(false);
+  const [lastDividendSync, setLastDividendSync] = useState(() => {
+    return localStorage.getItem('lastDividendSync') || '미실행';
+  });
+
+  // 🌟 [추가 상태] Iframe Sandbox 친화적인 전용 커스텀 모달 알림판 상태값
+  const [modalAlert, setModalAlert] = useState(null); // { title, message }
+  const [modalConfirm, setModalConfirm] = useState(null); // { title, message, onConfirm }
 
   // 인라인 주당 배당금 편집 임시 상태값
   const [editingDividendId, setEditingDividendId] = useState(null);
@@ -391,7 +401,8 @@ export default function App() {
               ...existing,
               quantity: newQty,
               avgPrice: newCost / newQty,
-              dividendPerShare: item.dividendPerShare !== undefined ? item.dividendPerShare : existing.dividendPerShare
+              dividendPerShare: item.dividendPerShare !== undefined ? item.dividendPerShare : existing.dividendPerShare,
+              addedAt: item.addedAt || existing.addedAt
             };
           } else {
             combined[item.id] = { ...item };
@@ -442,13 +453,10 @@ export default function App() {
       });
       return combined.sort((a, b) => b.date.localeCompare(a.date));
     }
-    return dividendsMap[activeAccountId] || [];
+    return Array.isArray(dividendsMap[activeAccountId]) ? dividendsMap[activeAccountId] : [];
   }, [dividendsMap, activeAccountId, accounts]);
 
-  // 💡 [중요 버그 수정 코멘트]
-  // 기존에는 자산 총합 계산(useMemo)이 배당금 연산 블록(dividendSummary) 아래에 있어서,
-  // 배당금 계산 시 totalAssets를 읽을 수 없어 ReferenceError(하얀 화면)가 발생했습니다.
-  // 자산 현황 요약 코드를 배당금 계산 블록보다 먼저 선언하여 이 의존성 TDZ 버그를 완벽하게 차단했습니다.
+  // 💡 [의존성 TDZ 해결 완료] 자산 현황 요약 코드를 배당금 계산 블록보다 먼저 선언
   const { totalInvested, totalAssets, totalProfit } = useMemo(() => {
     let invested = 0;
     let assets = 0;
@@ -465,7 +473,7 @@ export default function App() {
 
   const totalROI = totalInvested > 0 ? totalProfit / totalInvested : 0;
 
-  // 🌟 예상 연간 배당 현황 통계 연산 (이제 totalAssets가 상단에 선언되어 있어 안전하게 정상 실행됩니다)
+  // 🌟 예상 연간 배당 현황 통계 연산
   const dividendSummary = useMemo(() => {
     let estAnnualDividendKRW = 0;
     
@@ -544,6 +552,95 @@ export default function App() {
   const totalTargetWeight = currentPortfolio.reduce((acc, stock) => acc + (currentTargetWeights[stock.id] || 0), 0);
 
   // =========================================================================
+  // [배당금 엔진] 8.5 🌟 100% 자동 배당금 정산/동기화 기술 탑재
+  // =========================================================================
+  const syncAutoDividends = async () => {
+    if (isSyncingDividends) return;
+    setIsSyncingDividends(true);
+    
+    const updatedDividendsMap = { ...dividendsMap };
+    let anyNewDividends = false;
+
+    // 계좌별 포트폴리오를 순회하며 배당 기록을 자동으로 대조/확인
+    for (const [accId, portList] of Object.entries(portfolios)) {
+      if (!Array.isArray(portList) || portList.length === 0) continue;
+      
+      for (const stock of portList) {
+        try {
+          // 해당 종목의 지난 1년간 발생한 배당락(events=div) 내역을 가볍고 정확하게 요청
+          const targetUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${stock.id}?events=div&interval=1d&range=1y`;
+          const data = await fetchYahooAPI(targetUrl);
+          const dividendsObj = data?.chart?.result?.[0]?.events?.dividends;
+          
+          if (dividendsObj) {
+            // 해당 종목을 포트폴리오에 최초로 추가(매수)한 시점을 기준선으로 설정하여 과거 소급적용 차단
+            const stockAddedDate = stock.addedAt || '2026-01-01'; 
+            
+            Object.values(dividendsObj).forEach(divEvent => {
+              const eventDateObj = new Date(divEvent.date * 1000);
+              const eventDateStr = eventDateObj.toISOString().slice(0, 10);
+              const todayStr = new Date().toISOString().slice(0, 10);
+              
+              // 배당락일이 종목 최초 추가일보다 크거나 같고, 오늘 자정이거나 그 이전(이미 발생)인 경우에만 수령 대상으로 간주
+              if (eventDateStr >= stockAddedDate && eventDateStr <= todayStr) {
+                // 중복 기록 방지용 유니크 키 생성: "auto-{계좌ID}-{종목코드}-{배당락일}"
+                const uniqueKey = `auto-${accId}-${stock.id}-${eventDateStr}`;
+                
+                const accDivs = updatedDividendsMap[accId] || [];
+                const isAlreadyRecorded = accDivs.some(d => d.id === uniqueKey || d.uniqueKey === uniqueKey);
+                
+                if (!isAlreadyRecorded) {
+                  const amountPerShare = divEvent.amount;
+                  const totalAmountOriginal = stock.quantity * amountPerShare;
+                  const rate = stock.currency === 'USD' ? exchangeRate : 1;
+                  const totalAmountKRW = totalAmountOriginal * rate;
+                  
+                  const newRecord = {
+                    id: uniqueKey,
+                    uniqueKey: uniqueKey,
+                    stockId: stock.id,
+                    stockName: stock.name,
+                    date: eventDateStr,
+                    amount: totalAmountKRW, // 원화 환산액
+                    displayAmount: totalAmountOriginal, // 원본 통화액
+                    currency: stock.currency,
+                    isAuto: true // 🤖 자동 연동 배지용 플래그
+                  };
+                  
+                  accDivs.unshift(newRecord); // 최신이 상단에 배치되도록 처리
+                  updatedDividendsMap[accId] = accDivs;
+                  anyNewDividends = true;
+                }
+              }
+            });
+          }
+        } catch (e) {
+          console.error(`${stock.id} 배당 자동 정산 중 예외 발생:`, e);
+        }
+      }
+    }
+
+    if (anyNewDividends) {
+      setDividendsMap(updatedDividendsMap);
+    }
+    
+    const nowStr = new Date().toLocaleString('ko-KR');
+    setLastDividendSync(nowStr);
+    localStorage.setItem('lastDividendSync', nowStr);
+    setIsSyncingDividends(false);
+  };
+
+  // 앱 마운트 시 혹은 종목이 추가/수정될 때 자동 배당 동기화 엔진 백그라운드 호출
+  useEffect(() => {
+    if (allPortfolioSymbols.length > 0 && exchangeRate > 0) {
+      const timer = setTimeout(() => {
+        syncAutoDividends();
+      }, 2000); // UI 차단 예방을 위해 마운트 2초 후 부드럽게 배경 실행
+      return () => clearTimeout(timer);
+    }
+  }, [allPortfolioSymbols.length, exchangeRate]);
+
+  // =========================================================================
   // [계좌 제어] 9. 동적 계좌 추가, 수정, 삭제 제어 핸들러
   // =========================================================================
   const handleAddAccount = () => {
@@ -579,38 +676,44 @@ export default function App() {
   const handleDeleteAccount = () => {
     if (activeAccountId === 'all') return;
     if (accounts.length <= 1) {
-      alert('더 이상 삭제할 수 없습니다. 최소 1개의 독립 계좌는 유지되어야 합니다.');
+      setModalAlert({
+        title: '삭제 차단',
+        message: '더 이상 삭제할 수 없습니다. 최소 1개의 독립 계좌는 유지되어야 합니다.'
+      });
       return;
     }
 
-    const confirmDelete = window.confirm(`⚠️ 경고!\n"${accounts.find(a => a.id === activeAccountId)?.name}" 계좌와 그 안의 포트폴리오, 손익 기록이 전부 파괴됩니다. 정말 지우시겠습니까?`);
-    if (!confirmDelete) return;
+    setModalConfirm({
+      title: '계좌 영구 삭제',
+      message: `⚠️ 경고!\n"${accounts.find(a => a.id === activeAccountId)?.name}" 계좌와 그 안의 포트폴리오, 손익 및 배당 수령 기록이 영구 파괴됩니다. 정말 지우시겠습니까?`,
+      onConfirm: () => {
+        const remainingAccounts = accounts.filter(a => a.id !== activeAccountId);
+        const nextActiveId = remainingAccounts[0].id;
 
-    const remainingAccounts = accounts.filter(a => a.id !== activeAccountId);
-    const nextActiveId = remainingAccounts[0].id;
+        setAccounts(remainingAccounts);
+        setActiveAccountId(nextActiveId);
 
-    setAccounts(remainingAccounts);
-    setActiveAccountId(nextActiveId);
-
-    setPortfolios(prev => {
-      const copy = { ...prev };
-      delete copy[activeAccountId];
-      return copy;
-    });
-    setHistories(prev => {
-      const copy = { ...prev };
-      delete copy[activeAccountId];
-      return copy;
-    });
-    setTargetWeightsMap(prev => {
-      const copy = { ...prev };
-      delete copy[activeAccountId];
-      return copy;
-    });
-    setDividendsMap(prev => {
-      const copy = { ...prev };
-      delete copy[activeAccountId];
-      return copy;
+        setPortfolios(prev => {
+          const copy = { ...prev };
+          delete copy[activeAccountId];
+          return copy;
+        });
+        setHistories(prev => {
+          const copy = { ...prev };
+          delete copy[activeAccountId];
+          return copy;
+        });
+        setTargetWeightsMap(prev => {
+          const copy = { ...prev };
+          delete copy[activeAccountId];
+          return copy;
+        });
+        setDividendsMap(prev => {
+          const copy = { ...prev };
+          delete copy[activeAccountId];
+          return copy;
+        });
+      }
     });
   };
 
@@ -631,7 +734,10 @@ export default function App() {
     if (activeAccountId === 'all') return;
     const value = parseFloat(editingDividendValue);
     if (isNaN(value) || value < 0) {
-      alert('배당금 수치는 0 이상의 양수만 입력할 수 있습니다.');
+      setModalAlert({
+        title: '입력 값 오류',
+        message: '배당금 수치는 0 이상의 양수만 입력할 수 있습니다.'
+      });
       return;
     }
 
@@ -652,17 +758,26 @@ export default function App() {
   // [배당금 수령 기록 추가 기능]
   const handleAddReceivedDividend = () => {
     if (activeAccountId === 'all') {
-      alert('종합 요약 화면에서는 직접 배당 수령 내역을 기록할 수 없습니다. 개별 계좌 중 하나를 선택해 주세요!');
+      setModalAlert({
+        title: '입력 오류',
+        message: '종합 요약 화면에서는 직접 배당 수령 내역을 기록할 수 없습니다. 개별 계좌 중 하나를 선택해 주세요!'
+      });
       return;
     }
     if (!dividendInputStockId || !dividendInputAmount || !dividendInputDate) {
-      alert('종목, 금액 및 수령 날짜를 모두 충실히 기입해 주셔야 합니다.');
+      setModalAlert({
+        title: '미기입 항목 존재',
+        message: '종목, 금액 및 수령 날짜를 모두 충실히 기입해 주셔야 합니다.'
+      });
       return;
     }
 
     const amount = parseFloat(dividendInputAmount);
     if (isNaN(amount) || amount <= 0) {
-      alert('배당 수령액은 0보다 큰 수치여야 합니다.');
+      setModalAlert({
+        title: '입력 값 범위 초과',
+        message: '배당 수령액은 0보다 큰 수치여야 합니다.'
+      });
       return;
     }
 
@@ -680,7 +795,8 @@ export default function App() {
       date: dividendInputDate,
       amount: finalAmountKRW, 
       displayAmount: amount,  
-      currency: matchedStock.currency
+      currency: matchedStock.currency,
+      isAuto: false // 수동 등록 기록 구분
     };
 
     setDividendsMap(prev => {
@@ -697,15 +813,19 @@ export default function App() {
   // [배당금 수령 기록 삭제 기능]
   const handleRemoveReceivedDividend = (recordId, accId = activeAccountId) => {
     const targetKey = activeAccountId === 'all' ? accId : activeAccountId;
-    const confirmDelete = window.confirm('해당 배당 수령 기록을 정말로 영구 소멸시키겠습니까?');
-    if (!confirmDelete) return;
-
-    setDividendsMap(prev => {
-      const activeList = prev[targetKey] || [];
-      return {
-        ...prev,
-        [targetKey]: activeList.filter(d => d.id !== recordId)
-      };
+    
+    setModalConfirm({
+      title: '배당 기록 삭제',
+      message: '해당 배당 수령 기록을 정말로 영구 소멸시키겠습니까?',
+      onConfirm: () => {
+        setDividendsMap(prev => {
+          const activeList = prev[targetKey] || [];
+          return {
+            ...prev,
+            [targetKey]: activeList.filter(d => d.id !== recordId)
+          };
+        });
+      }
     });
   };
 
@@ -730,7 +850,10 @@ export default function App() {
 
   const handleAddPortfolio = () => {
     if (activeAccountId === 'all') {
-      alert('종합 요약 화면에서는 직접 종목을 매매할 수 없습니다. 위의 개별 계좌 중 하나를 활성화하고 거래를 진행해 주세요!');
+      setModalAlert({
+        title: '거래 거부',
+        message: '종합 요약 화면에서는 직접 종목을 매매할 수 없습니다. 위의 개별 계좌 중 하나를 활성화하고 거래를 진행해 주세요!'
+      });
       return;
     }
     if (!selectedStock || !inputQuantity || !inputAvgPrice) return;
@@ -738,7 +861,10 @@ export default function App() {
     const avg = parseFloat(inputAvgPrice);
     
     if (qty <= 0 || avg <= 0) {
-      alert("거래 수량과 가격은 반드시 0보다 커야 합니다.");
+      setModalAlert({
+        title: '입력 범위 오류',
+        message: '거래 수량과 가격은 반드시 0보다 커야 합니다.'
+      });
       return;
     }
 
@@ -751,15 +877,31 @@ export default function App() {
         const existing = activePort[existingIndex];
         const totalCost = (existing.quantity * existing.avgPrice) + (qty * avg);
         const newQuantity = existing.quantity + qty;
-        updatedPort[existingIndex] = { ...existing, quantity: newQuantity, avgPrice: totalCost / newQuantity };
+        updatedPort[existingIndex] = { 
+          ...existing, 
+          quantity: newQuantity, 
+          avgPrice: totalCost / newQuantity,
+          addedAt: existing.addedAt || new Date().toISOString().slice(0, 10) // 🌟 매수시점 추적용 날짜 세팅
+        };
       } else {
-        updatedPort.push({ id: selectedStock.id, name: selectedStock.name, quantity: qty, avgPrice: avg, currency: selectedStock.currency });
+        updatedPort.push({ 
+          id: selectedStock.id, 
+          name: selectedStock.name, 
+          quantity: qty, 
+          avgPrice: avg, 
+          currency: selectedStock.currency,
+          addedAt: new Date().toISOString().slice(0, 10) // 🌟 종목 최초 매수일 세팅
+        });
       }
     } else {
       if (existingIndex >= 0) {
         const existing = activePort[existingIndex];
         if (existing.quantity < qty) {
-          alert("현재 보유량보다 많은 주식을 매도해 처분할 수 없습니다."); return;
+          setModalAlert({
+            title: '매도 한도 초과',
+            message: '현재 보유량보다 많은 주식을 매도해 처분할 수 없습니다.'
+          });
+          return;
         }
         const newQuantity = existing.quantity - qty;
         if (newQuantity === 0) {
@@ -771,7 +913,11 @@ export default function App() {
           updatedPort[existingIndex] = { ...existing, quantity: newQuantity };
         }
       } else {
-        alert("이 주머니에는 매도할 수 있는 보유 수량이 없습니다."); return;
+        setModalAlert({
+          title: '종목 부재',
+          message: '이 주머니에는 매도할 수 있는 보유 수량이 없습니다.'
+        });
+        return;
       }
     }
 
@@ -781,27 +927,40 @@ export default function App() {
 
   const handleRemovePortfolio = (id) => {
     if (activeAccountId === 'all') {
-      alert('종합 화면에서는 임의 삭제가 차단됩니다. 해당 종목을 보유한 계좌로 이동해서 제거해 주세요.');
+      setModalAlert({
+        title: '삭제 거부',
+        message: '종합 화면에서는 임의 삭제가 차단됩니다. 해당 종목을 보유한 계좌로 이동해서 제거해 주세요.'
+      });
       return;
     }
-    const activePort = portfolios[activeAccountId] || [];
-    setPortfolios(prev => ({
-      ...prev,
-      [activeAccountId]: activePort.filter(p => p.id !== id)
-    }));
+    
+    setModalConfirm({
+      title: '종목 포트폴리오 제거',
+      message: '보유 자산에서 해당 종목을 즉시 제거하시겠습니까? (거래 이력만 소멸하며, 자산기록은 유지됩니다)',
+      onConfirm: () => {
+        const activePort = portfolios[activeAccountId] || [];
+        setPortfolios(prev => ({
+          ...prev,
+          [activeAccountId]: activePort.filter(p => p.id !== id)
+        }));
 
-    const activeWeights = { ...(targetWeightsMap[activeAccountId] || {}) };
-    delete activeWeights[id];
-    setTargetWeightsMap(prev => ({
-      ...prev,
-      [activeAccountId]: activeWeights
-    }));
+        const activeWeights = { ...(targetWeightsMap[activeAccountId] || {}) };
+        delete activeWeights[id];
+        setTargetWeightsMap(prev => ({
+          ...prev,
+          [activeAccountId]: activeWeights
+        }));
+      }
+    });
   };
 
   // 매월 수동 기록 핸들러
   const handleRecordAssets = () => {
     if (activeAccountId === 'all') {
-      alert('종합 탭에서는 임의로 합계 데이터를 주입할 수 없습니다. 개별 주머니 계좌에서 각각 기록을 등록해 주시면, 종합 그래프가 알아서 통합 자산을 도출해냅니다.');
+      setModalAlert({
+        title: '자산 기록 오류',
+        message: '종합 탭에서는 임의로 합계 데이터를 주입할 수 없습니다. 개별 주머니 계좌에서 각각 기록을 등록해 주시면, 종합 그래프가 알아서 통합 자산을 도출해냅니다.'
+      });
       return;
     }
     if (!recordDate) return;
@@ -903,7 +1062,7 @@ export default function App() {
                       <span>이름 수정</span>
                     </button>
                     <button
-                      onClick={handleDeleteAccount} // 🌟 계좌 삭제 시 'DeleteAccount'가 아닌 'handleDeleteAccount'가 실행되도록 완벽히 교정되었습니다.
+                      onClick={handleDeleteAccount} 
                       className="flex items-center space-x-1 px-2.5 py-1.5 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -1266,6 +1425,29 @@ export default function App() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
                 
+                {/* 🌟 0. 자동 배당금 동기화 상태 패널 */}
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center space-x-2">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                      </span>
+                      <h3 className="text-md font-bold text-gray-900">배당금 실시간 자동 정산 기능</h3>
+                    </div>
+                    <p className="text-xs text-gray-500">내가 종목을 포트폴리오에 추가한 시점 이후의 모든 실시간 배당을 추적하여 동기화합니다.</p>
+                    <div className="text-xs font-semibold text-indigo-600 mt-1">마지막 자동 연동: {lastDividendSync}</div>
+                  </div>
+                  <button 
+                    onClick={syncAutoDividends}
+                    disabled={isSyncingDividends}
+                    className={`flex items-center justify-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all ${isSyncingDividends ? 'opacity-70 cursor-wait' : ''}`}
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDividends ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingDividends ? '동기화 중...' : '지금 배당 동기화'}</span>
+                  </button>
+                </div>
+
                 {/* 1. 주당 배당금(연간) 설정 테이블 */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                   <div className="flex justify-between items-center mb-3">
@@ -1351,13 +1533,13 @@ export default function App() {
                 {activeAccountId === 'all' ? (
                   <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-100 text-center">
                     <p className="text-sm font-medium text-indigo-700">
-                      💡 종합 자산 보기 상태입니다. 실제 배당금을 수령하여 장부에 기입하시려면 상단에서 <strong>개별 계좌</strong>를 선택해 주세요.
+                      💡 종합 자산 보기 상태입니다. 수동으로 배당금을 직접 기입하시려면 상단에서 <strong>개별 계좌</strong>를 선택해 주세요.
                     </p>
                   </div>
                 ) : (
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                     <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
-                      <Plus className="w-5 h-5 mr-2 text-indigo-500" /> 실제 배당 수령 기록 추가
+                      <Plus className="w-5 h-5 mr-2 text-indigo-500" /> 수동 배당 수령 수기 입력
                     </h2>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                       <div className="flex-1">
@@ -1440,7 +1622,17 @@ export default function App() {
                                   <td className="px-4 py-4 font-semibold text-indigo-600">{div.accName}</td>
                                 )}
                                 <td className="px-4 py-4 text-gray-600">{div.date}</td>
-                                <td className="px-4 py-4 font-medium text-gray-900">{div.stockName}</td>
+                                <td className="px-4 py-4 font-medium text-gray-900">
+                                  <div className="flex items-center space-x-1.5">
+                                    <span>{div.stockName}</span>
+                                    {div.isAuto && (
+                                      <span className="flex items-center space-x-0.5 text-[9px] bg-green-50 text-green-600 px-1.5 py-0.5 rounded font-bold border border-green-200">
+                                        <CheckCircle2 className="w-2.5 h-2.5" />
+                                        <span>자동</span>
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
                                 <td className="px-4 py-4 text-right font-medium">
                                   {isUSD ? formatUSD(div.displayAmount) : formatCurrency(div.displayAmount)}
                                 </td>
@@ -1493,6 +1685,53 @@ export default function App() {
         )}
         
       </div>
+
+      {/* ==========================================================
+          [CORS / 이프레임 가드] 11. 🌟 리액트 커스텀 모달 알림창 마크업
+          ========================================================== */}
+      {/* 1. 커스텀 단순 경고창 모달 (Alert) */}
+      {modalAlert && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl space-y-4 border border-gray-100">
+            <h3 className="text-lg font-bold text-gray-900">{modalAlert.title}</h3>
+            <p className="text-sm text-gray-600 whitespace-pre-line leading-relaxed">{modalAlert.message}</p>
+            <button 
+              onClick={() => setModalAlert(null)}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl transition-colors text-sm"
+            >
+              확인
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 2. 커스텀 액션 선택 모달 (Confirm) */}
+      {modalConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl space-y-4 border border-gray-100">
+            <h3 className="text-lg font-bold text-gray-900 text-red-600">{modalConfirm.title}</h3>
+            <p className="text-sm text-gray-600 whitespace-pre-line leading-relaxed">{modalConfirm.message}</p>
+            <div className="flex space-x-2">
+              <button 
+                onClick={() => setModalConfirm(null)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-xl transition-colors text-sm"
+              >
+                취소
+              </button>
+              <button 
+                onClick={() => {
+                  modalConfirm.onConfirm();
+                  setModalConfirm(null);
+                }}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-xl transition-colors text-sm"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
