@@ -3,16 +3,10 @@ import { Search, Plus, Trash2, TrendingUp, TrendingDown, Calendar, PieChart, Act
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 // =========================================================================
-// [설정] 1. 초즉시 반응형 로컬 인기 종목 사전 (★ 0008S0.KS 및 인기 ETF 추가 탑재)
+// [설정] 1. 초즉시 반응형 로컬 인기 종목 사전
 // =========================================================================
-// 야후 파이낸스 검색 서버는 한국어 띄어쓰기나 긴 상품명 검색에 매우 취약합니다.
-// 이를 극복하기 위해 국내 투자자들이 가장 선호하는 핵심 배당/커버드콜 자산군을 로컬 사전에 추가했습니다.
-// 이제 네트워크 상태가 불안정하거나 검색어가 길어도 무조건 0.01초 만에 즉시 매칭됩니다.
 const POPULAR_STOCKS = [
-  // 💡 이미지 속 주인공: 티커 중간에 S가 들어가는 고배당 타겟데일리 커버드콜 ETF
   { id: '0008S0.KS', name: 'TIGER 미국배당다우존스타겟데일리커버드콜', currency: 'KRW', exchange: 'KSC' },
-  
-  // 기타 초인기 국내/해외 배당 및 커버드콜 ETF 라인업
   { id: '482730.KS', name: 'TIGER 미국30년국채코액티브(H)', currency: 'KRW', exchange: 'KSC' },
   { id: '479010.KS', name: 'SOL 미국배당다우존스', currency: 'KRW', exchange: 'KSC' },
   { id: '379780.KS', name: 'KBSTAR 미국S&P500', currency: 'KRW', exchange: 'KSC' },
@@ -21,8 +15,6 @@ const POPULAR_STOCKS = [
   { id: 'TLT', name: 'iShares 20+ Year Treasury Bond ETF (TLT)', currency: 'USD', exchange: 'NASDAQ' },
   { id: 'SPY', name: 'SPDR S&P 500 ETF Trust (SPY)', currency: 'USD', exchange: 'NYSE Arca' },
   { id: 'QQQ', name: 'Invesco QQQ Trust (QQQ)', currency: 'USD', exchange: 'NASDAQ' },
-  
-  // 국내 주요 대형주
   { id: '005930.KS', name: '삼성전자', currency: 'KRW', exchange: 'KSC' },
   { id: '000660.KS', name: 'SK하이닉스', currency: 'KRW', exchange: 'KSC' },
   { id: '035420.KS', name: 'NAVER', currency: 'KRW', exchange: 'KSC' },
@@ -32,44 +24,40 @@ const POPULAR_STOCKS = [
 // =========================================================================
 // [설정] 2. 기초 종목별 연간 디폴트 주당 배당금 정의 데이터베이스
 // =========================================================================
-// 주당 연간 배당금의 기본 가이드라인 수치입니다. (원화 종목은 원 단위, 미국 종목은 달러 단위)
-// 사용자가 포트폴리오 화면에서 배당금을 직접 편집하면 이 기본값 대신 편집한 값으로 자동 변경됩니다.
 const getDefaultDividend = (symbol) => {
-  if (symbol.startsWith('0008S0')) return 1020; // TIGER 타겟데일리커버드콜 (월 약 85원 분배 기준 연간 약 1,020원)
-  if (symbol.startsWith('005930')) return 1440; // 삼성전자
-  if (symbol.startsWith('000660')) return 1200; // SK 하이닉스
-  if (symbol.startsWith('479010')) return 400;  // SOL 미국배당다우존스
-  if (symbol.startsWith('482730')) return 660;  // TIGER 미국30년국채코액티브
-  if (symbol.startsWith('AAPL')) return 1.04;    // 애플
-  if (symbol.startsWith('TSLA')) return 0;       // 테슬라
-  if (symbol.startsWith('MSFT')) return 3.00;    // 마이크로소프트
-  if (symbol.startsWith('NVDA')) return 0.04;    // 엔비디아
-  if (symbol.startsWith('TLT')) return 4.52;     // TLT
-  if (symbol.startsWith('IEF')) return 3.12;     // IEF
-  if (symbol.startsWith('VWO')) return 1.45;     // VWO
-  if (symbol.startsWith('SPY')) return 7.15;     // SPY
-  if (symbol.startsWith('QQQ')) return 2.70;     // QQQ
-  return symbol.endsWith('.KS') || symbol.endsWith('.KQ') ? 100 : 0.50; // 그 외 기타 기본값 세팅
+  if (symbol.startsWith('0008S0')) return 1020; 
+  if (symbol.startsWith('005930')) return 1440; 
+  if (symbol.startsWith('000660')) return 1200; 
+  if (symbol.startsWith('479010')) return 400;  
+  if (symbol.startsWith('482730')) return 660;  
+  if (symbol.startsWith('AAPL')) return 1.04;    
+  if (symbol.startsWith('TSLA')) return 0;       
+  if (symbol.startsWith('MSFT')) return 3.00;    
+  if (symbol.startsWith('NVDA')) return 0.04;    
+  if (symbol.startsWith('TLT')) return 4.52;     
+  if (symbol.startsWith('IEF')) return 3.12;     
+  if (symbol.startsWith('VWO')) return 1.45;     
+  if (symbol.startsWith('SPY')) return 7.15;     
+  if (symbol.startsWith('QQQ')) return 2.70;     
+  return symbol.endsWith('.KS') || symbol.endsWith('.KQ') ? 100 : 0.50; 
 };
 
-// 화폐 포맷 유틸 함수 (원화 포맷팅)
+// 화폐 포맷 유틸 함수
 const formatCurrency = (value) => {
   if (value === undefined || value === null) return '0원';
   return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 }).format(value) + '원';
 };
 
-// 화폐 포맷 유틸 함수 (달러 포맷팅)
 const formatUSD = (value) => {
   if (value === undefined || value === null) return '$0.00';
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
 };
 
-// 수익률 포맷 유틸 함수
 const formatPercent = (value) => {
   return (value * 100).toFixed(2) + '%';
 };
 
-// 스마트 CORS 우회 API 호출 함수 (이중 장애 대비 설계)
+// 스마트 CORS 우회 API 호출 함수
 const fetchYahooAPI = async (targetUrl) => {
   const cacheBuster = `&nocache=${Date.now()}`;
   const finalUrl = targetUrl + cacheBuster;
@@ -102,8 +90,6 @@ export default function App() {
   // =========================================================================
   // [상태 관리] 3. 다중 계좌 시스템 - 로컬 스토리지 데이터 동기화
   // =========================================================================
-  
-  // 가입된 계좌 목록 정의
   const [accounts, setAccounts] = useState(() => {
     const saved = localStorage.getItem('portfolioAccounts');
     if (saved) return JSON.parse(saved);
@@ -113,7 +99,6 @@ export default function App() {
     ];
   });
 
-  // 현재 브라우저 화면에 선택되어 활성화되어 있는 계좌 ID
   const [activeAccountId, setActiveAccountId] = useState(() => {
     const saved = localStorage.getItem('portfolioActiveAccountId');
     return saved || 'acc-default';
@@ -122,14 +107,10 @@ export default function App() {
   const [isEditingAccountName, setIsEditingAccountName] = useState(false);
   const [editAccountNameInput, setEditAccountNameInput] = useState('');
 
-  // 🌟 전체 앱 뷰 모드 ('portfolio': 포트폴리오&리밸런싱 | 'dividend': 배당금 분석&기록)
   const [subViewMode, setSubViewMode] = useState('portfolio');
-
-  // 실시간 주가 및 연동 환율 저장소
   const [marketPrices, setMarketPrices] = useState({});
   const [exchangeRate, setExchangeRate] = useState(1350.00); 
 
-  // 계좌별 포트폴리오 맵 로드
   const [portfolios, setPortfolios] = useState(() => {
     const saved = localStorage.getItem('portfoliosMap');
     if (saved) return JSON.parse(saved);
@@ -144,7 +125,6 @@ export default function App() {
     };
   });
 
-  // 계좌별 자산 추이 역사기록 맵 로드
   const [histories, setHistories] = useState(() => {
     const saved = localStorage.getItem('historiesMap');
     if (saved) return JSON.parse(saved);
@@ -159,7 +139,6 @@ export default function App() {
     };
   });
 
-  // 계좌별 리밸런싱 목표 비중 맵 로드
   const [targetWeightsMap, setTargetWeightsMap] = useState(() => {
     const saved = localStorage.getItem('targetWeightsMap');
     if (saved) return JSON.parse(saved);
@@ -174,7 +153,6 @@ export default function App() {
     };
   });
 
-  // 계좌별 실제 배당금 수령 기록 보관용 맵 데이터베이스
   const [dividendsMap, setDividendsMap] = useState(() => {
     const saved = localStorage.getItem('dividendsMap');
     if (saved) return JSON.parse(saved);
@@ -184,26 +162,21 @@ export default function App() {
     };
   });
 
-  // 🌟 [추가 상태] 자동 배당금 수령 동기화 엔진 상태
   const [isSyncingDividends, setIsSyncingDividends] = useState(false);
   const [lastDividendSync, setLastDividendSync] = useState(() => {
     return localStorage.getItem('lastDividendSync') || '미실행';
   });
 
-  // 🌟 [추가 상태] Iframe Sandbox 친화적인 전용 커스텀 모달 알림판 상태값
-  const [modalAlert, setModalAlert] = useState(null); // { title, message }
-  const [modalConfirm, setModalConfirm] = useState(null); // { title, message, onConfirm }
+  const [modalAlert, setModalAlert] = useState(null); 
+  const [modalConfirm, setModalConfirm] = useState(null); 
 
-  // 인라인 주당 배당금 편집 임시 상태값
   const [editingDividendId, setEditingDividendId] = useState(null);
   const [editingDividendValue, setEditingDividendValue] = useState('');
 
-  // 배당금 수령 기록 입력 폼 전용 상태값
   const [dividendInputStockId, setDividendInputStockId] = useState('');
   const [dividendInputAmount, setDividendInputAmount] = useState('');
-  const [dividendInputDate, setDividendInputDate] = useState(new Date().toISOString().slice(0, 10)); // 기본값 오늘 날짜
+  const [dividendInputDate, setDividendInputDate] = useState(new Date().toISOString().slice(0, 10)); 
 
-  // 화면 검색 및 거래 입력 폼 전용 상태값들
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -219,29 +192,12 @@ export default function App() {
   // =========================================================================
   // [동기화] 4. 상태 변화 감지 및 브라우저 로컬 저장 자동 처리
   // =========================================================================
-  useEffect(() => {
-    localStorage.setItem('portfolioAccounts', JSON.stringify(accounts));
-  }, [accounts]);
-
-  useEffect(() => {
-    localStorage.setItem('portfolioActiveAccountId', activeAccountId);
-  }, [activeAccountId]);
-
-  useEffect(() => {
-    localStorage.setItem('portfoliosMap', JSON.stringify(portfolios));
-  }, [portfolios]);
-
-  useEffect(() => {
-    localStorage.setItem('historiesMap', JSON.stringify(histories));
-  }, [histories]);
-
-  useEffect(() => {
-    localStorage.setItem('targetWeightsMap', JSON.stringify(targetWeightsMap));
-  }, [targetWeightsMap]);
-
-  useEffect(() => {
-    localStorage.setItem('dividendsMap', JSON.stringify(dividendsMap));
-  }, [dividendsMap]);
+  useEffect(() => { localStorage.setItem('portfolioAccounts', JSON.stringify(accounts)); }, [accounts]);
+  useEffect(() => { localStorage.setItem('portfolioActiveAccountId', activeAccountId); }, [activeAccountId]);
+  useEffect(() => { localStorage.setItem('portfoliosMap', JSON.stringify(portfolios)); }, [portfolios]);
+  useEffect(() => { localStorage.setItem('historiesMap', JSON.stringify(histories)); }, [histories]);
+  useEffect(() => { localStorage.setItem('targetWeightsMap', JSON.stringify(targetWeightsMap)); }, [targetWeightsMap]);
+  useEffect(() => { localStorage.setItem('dividendsMap', JSON.stringify(dividendsMap)); }, [dividendsMap]);
 
   // =========================================================================
   // [네트워크] 5. 실시간 달러 기준가(환율) 동기화 호출
@@ -276,11 +232,9 @@ export default function App() {
       setIsSearching(true);
       try {
         const queryKeywords = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
-
         const localFiltered = POPULAR_STOCKS.filter(stock => {
           return queryKeywords.every(kw => 
-            stock.name.toLowerCase().includes(kw) || 
-            stock.id.toLowerCase().includes(kw)
+            stock.name.toLowerCase().includes(kw) || stock.id.toLowerCase().includes(kw)
           );
         });
         
@@ -307,10 +261,7 @@ export default function App() {
           setSearchResults(prev => {
             const combined = [...prev];
             apiQuotes.forEach(apiStock => {
-              const isAlreadyExist = combined.some(s => s.id === apiStock.id);
-              if (!isAlreadyExist) {
-                combined.push(apiStock);
-              }
+              if (!combined.some(s => s.id === apiStock.id)) combined.push(apiStock);
             });
             return combined;
           });
@@ -326,7 +277,7 @@ export default function App() {
   }, [searchQuery, selectedStock]);
 
   // =========================================================================
-  // [시세 감시] 7. 등록된 자산들의 실시간 현재가 초경량 모니터링 (Spark API 가동)
+  // [시세 감시] 7. 등록된 자산들의 실시간 현재가 초경량 모니터링
   // =========================================================================
   const allPortfolioSymbols = useMemo(() => {
     const symbols = new Set();
@@ -350,9 +301,7 @@ export default function App() {
         if (data && data.spark && data.spark.result) {
           data.spark.result.forEach(item => {
             const price = item.response?.[0]?.meta?.regularMarketPrice;
-            if (price) {
-              newPrices[item.symbol] = price;
-            }
+            if (price) newPrices[item.symbol] = price;
           });
         }
       } catch(e) {
@@ -386,8 +335,6 @@ export default function App() {
   // =========================================================================
   // [수학 연산] 8. 다중 계좌 데이터 처리 및 종합(합산) 계좌 가중치 연산
   // =========================================================================
-  
-  // 현재 활성화되어 보고 있는 계좌의 주식 포트폴리오 목록 가공
   const currentPortfolio = useMemo(() => {
     if (activeAccountId === 'all') {
       const combined = {};
@@ -414,7 +361,6 @@ export default function App() {
     return portfolios[activeAccountId] || [];
   }, [portfolios, activeAccountId]);
 
-  // 현재 활성화된 계좌 혹은 전체 종합의 역사 자산 추이 합산 가공
   const currentHistory = useMemo(() => {
     if (activeAccountId === 'all') {
       const dateMap = {};
@@ -433,13 +379,11 @@ export default function App() {
     return histories[activeAccountId] || [];
   }, [histories, activeAccountId]);
 
-  // 타깃 계좌의 목표 리밸런싱 비중 목록
   const currentTargetWeights = useMemo(() => {
     if (activeAccountId === 'all') return {};
     return targetWeightsMap[activeAccountId] || {};
   }, [targetWeightsMap, activeAccountId]);
 
-  // 🌟 현재 활성화된 계좌의 실제 배당 수령 기록 추출
   const currentDividends = useMemo(() => {
     if (activeAccountId === 'all') {
       const combined = [];
@@ -456,7 +400,6 @@ export default function App() {
     return Array.isArray(dividendsMap[activeAccountId]) ? dividendsMap[activeAccountId] : [];
   }, [dividendsMap, activeAccountId, accounts]);
 
-  // 💡 [의존성 TDZ 해결 완료] 자산 현황 요약 코드를 배당금 계산 블록보다 먼저 선언
   const { totalInvested, totalAssets, totalProfit } = useMemo(() => {
     let invested = 0;
     let assets = 0;
@@ -473,7 +416,6 @@ export default function App() {
 
   const totalROI = totalInvested > 0 ? totalProfit / totalInvested : 0;
 
-  // 🌟 예상 연간 배당 현황 통계 연산
   const dividendSummary = useMemo(() => {
     let estAnnualDividendKRW = 0;
     
@@ -495,7 +437,6 @@ export default function App() {
     };
   }, [currentPortfolio, marketPrices, exchangeRate, totalAssets]);
 
-  // 🌟 월별 배당금 수령 통계 데이터 포맷팅 (차트용)
   const monthlyReceivedChartData = useMemo(() => {
     const monthlyMap = {};
     
@@ -511,7 +452,6 @@ export default function App() {
       .slice(-12); 
   }, [currentDividends]);
 
-  // 리밸런싱 세팅 연산
   const setWeightsToCurrent = () => {
     if (activeAccountId === 'all') return;
     const newWeights = {};
@@ -552,7 +492,7 @@ export default function App() {
   const totalTargetWeight = currentPortfolio.reduce((acc, stock) => acc + (currentTargetWeights[stock.id] || 0), 0);
 
   // =========================================================================
-  // [배당금 엔진] 8.5 🌟 100% 자동 배당금 정산/동기화 기술 탑재
+  // [배당금 엔진] 8.5 🌟 100% 자동 배당금 정산/동기화 (과거 데이터 통제 및 수량 락킹)
   // =========================================================================
   const syncAutoDividends = async () => {
     if (isSyncingDividends) return;
@@ -561,34 +501,42 @@ export default function App() {
     const updatedDividendsMap = { ...dividendsMap };
     let anyNewDividends = false;
 
-    // 계좌별 포트폴리오를 순회하며 배당 기록을 자동으로 대조/확인
+    // 🌟 사용자 요청: 무조건 5월 1일 이후의 데이터만 반영되도록 시스템 최소 기준일 설정
+    const SYSTEM_START_DATE = '2026-05-01';
+
     for (const [accId, portList] of Object.entries(portfolios)) {
       if (!Array.isArray(portList) || portList.length === 0) continue;
       
       for (const stock of portList) {
         try {
-          // 해당 종목의 지난 1년간 발생한 배당락(events=div) 내역을 가볍고 정확하게 요청
           const targetUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${stock.id}?events=div&interval=1d&range=1y`;
           const data = await fetchYahooAPI(targetUrl);
           const dividendsObj = data?.chart?.result?.[0]?.events?.dividends;
           
           if (dividendsObj) {
-            // 해당 종목을 포트폴리오에 최초로 추가(매수)한 시점을 기준선으로 설정하여 과거 소급적용 차단
-            const stockAddedDate = stock.addedAt || '2026-01-01'; 
+            // 주식을 처음 산 날짜가 없으면 기본값인 5월 1일로 설정
+            const stockAddedDate = stock.addedAt || SYSTEM_START_DATE; 
             
             Object.values(dividendsObj).forEach(divEvent => {
               const eventDateObj = new Date(divEvent.date * 1000);
               const eventDateStr = eventDateObj.toISOString().slice(0, 10);
               const todayStr = new Date().toISOString().slice(0, 10);
               
-              // 배당락일이 종목 최초 추가일보다 크거나 같고, 오늘 자정이거나 그 이전(이미 발생)인 경우에만 수령 대상으로 간주
-              if (eventDateStr >= stockAddedDate && eventDateStr <= todayStr) {
-                // 중복 기록 방지용 유니크 키 생성: "auto-{계좌ID}-{종목코드}-{배당락일}"
-                const uniqueKey = `auto-${accId}-${stock.id}-${eventDateStr}`;
+              // 🌟 필터 1: 배당락일이 시스템 기준일(5월 1일) 이후여야 함
+              // 🌟 필터 2: 종목을 내가 매수한 날(addedAt) 이후여야 함
+              // 🌟 필터 3: 미래 날짜가 아닌 이미 발생한 날짜여야 함
+              if (eventDateStr >= SYSTEM_START_DATE && eventDateStr >= stockAddedDate && eventDateStr <= todayStr) {
                 
+                const uniqueKey = `auto-${accId}-${stock.id}-${eventDateStr}`;
                 const accDivs = updatedDividendsMap[accId] || [];
+                
+                // 해당 배당 건이 장부에 이미 기록되었는지 확인
                 const isAlreadyRecorded = accDivs.some(d => d.id === uniqueKey || d.uniqueKey === uniqueKey);
                 
+                // 🌟 수량 변경 버그 예방 아키텍처:
+                // 기록되지 않은 '새로운' 배당금만 동기화합니다. 
+                // 이미 기록된 과거의 배당금(예: 5월 배당금)은 이후 사용자가 6월에 주식을 추가 매수하여 
+                // stock.quantity가 변하더라도 절대 덮어씌워지지 않고 과거 수량 그대로 영구 보존(락)됩니다.
                 if (!isAlreadyRecorded) {
                   const amountPerShare = divEvent.amount;
                   const totalAmountOriginal = stock.quantity * amountPerShare;
@@ -601,13 +549,14 @@ export default function App() {
                     stockId: stock.id,
                     stockName: stock.name,
                     date: eventDateStr,
-                    amount: totalAmountKRW, // 원화 환산액
-                    displayAmount: totalAmountOriginal, // 원본 통화액
+                    amount: totalAmountKRW,
+                    displayAmount: totalAmountOriginal,
                     currency: stock.currency,
-                    isAuto: true // 🤖 자동 연동 배지용 플래그
+                    lockedQuantity: stock.quantity, // 🌟 이 배당을 받을 당시의 보유 수량을 명시적으로 박제(스냅샷)
+                    isAuto: true 
                   };
                   
-                  accDivs.unshift(newRecord); // 최신이 상단에 배치되도록 처리
+                  accDivs.unshift(newRecord); 
                   updatedDividendsMap[accId] = accDivs;
                   anyNewDividends = true;
                 }
@@ -630,12 +579,11 @@ export default function App() {
     setIsSyncingDividends(false);
   };
 
-  // 앱 마운트 시 혹은 종목이 추가/수정될 때 자동 배당 동기화 엔진 백그라운드 호출
   useEffect(() => {
     if (allPortfolioSymbols.length > 0 && exchangeRate > 0) {
       const timer = setTimeout(() => {
         syncAutoDividends();
-      }, 2000); // UI 차단 예방을 위해 마운트 2초 후 부드럽게 배경 실행
+      }, 2000); 
       return () => clearTimeout(timer);
     }
   }, [allPortfolioSymbols.length, exchangeRate]);
@@ -720,8 +668,6 @@ export default function App() {
   // =========================================================================
   // [거래 및 배당 관리] 10. 주식 매매 및 배당금 처리 핵심 함수들
   // =========================================================================
-  
-  // [배당금 인라인 수정 기능] 주당 배당금(연간) 데이터를 즉각 반영합니다.
   const handleEditDividendClick = (stock) => {
     if (activeAccountId === 'all') return;
     setEditingDividendId(stock.id);
@@ -755,7 +701,6 @@ export default function App() {
     setEditingDividendId(null);
   };
 
-  // [배당금 수령 기록 추가 기능]
   const handleAddReceivedDividend = () => {
     if (activeAccountId === 'all') {
       setModalAlert({
@@ -784,7 +729,6 @@ export default function App() {
     const matchedStock = currentPortfolio.find(p => p.id === dividendInputStockId);
     if (!matchedStock) return;
 
-    // 수령 배당금이 USD일 경우, 현재 고정 환율을 기준 삼아 원화(KRW)로 정밀 변환해 기록합니다.
     const isUSD = matchedStock.currency === 'USD';
     const finalAmountKRW = isUSD ? amount * exchangeRate : amount;
 
@@ -796,7 +740,7 @@ export default function App() {
       amount: finalAmountKRW, 
       displayAmount: amount,  
       currency: matchedStock.currency,
-      isAuto: false // 수동 등록 기록 구분
+      isAuto: false 
     };
 
     setDividendsMap(prev => {
@@ -810,7 +754,6 @@ export default function App() {
     setDividendInputAmount('');
   };
 
-  // [배당금 수령 기록 삭제 기능]
   const handleRemoveReceivedDividend = (recordId, accId = activeAccountId) => {
     const targetKey = activeAccountId === 'all' ? accId : activeAccountId;
     
@@ -829,7 +772,6 @@ export default function App() {
     });
   };
 
-  // 종목 선택 핸들러
   const handleSelectStock = async (stock) => {
     setSelectedStock(stock);
     setSearchQuery(stock.name);
@@ -881,7 +823,7 @@ export default function App() {
           ...existing, 
           quantity: newQuantity, 
           avgPrice: totalCost / newQuantity,
-          addedAt: existing.addedAt || new Date().toISOString().slice(0, 10) // 🌟 매수시점 추적용 날짜 세팅
+          addedAt: existing.addedAt || new Date().toISOString().slice(0, 10) 
         };
       } else {
         updatedPort.push({ 
@@ -890,7 +832,7 @@ export default function App() {
           quantity: qty, 
           avgPrice: avg, 
           currency: selectedStock.currency,
-          addedAt: new Date().toISOString().slice(0, 10) // 🌟 종목 최초 매수일 세팅
+          addedAt: new Date().toISOString().slice(0, 10) 
         });
       }
     } else {
@@ -954,7 +896,6 @@ export default function App() {
     });
   };
 
-  // 매월 수동 기록 핸들러
   const handleRecordAssets = () => {
     if (activeAccountId === 'all') {
       setModalAlert({
@@ -979,7 +920,6 @@ export default function App() {
     setHistories(prev => ({ ...prev, [activeAccountId]: updatedHist }));
   };
 
-  // 등락 컬러 조건문
   const getProfitColor = (value) => value > 0 ? 'text-red-500' : value < 0 ? 'text-blue-500' : 'text-gray-600';
 
   return (
@@ -1435,7 +1375,7 @@ export default function App() {
                       </span>
                       <h3 className="text-md font-bold text-gray-900">배당금 실시간 자동 정산 기능</h3>
                     </div>
-                    <p className="text-xs text-gray-500">내가 종목을 포트폴리오에 추가한 시점 이후의 모든 실시간 배당을 추적하여 동기화합니다.</p>
+                    <p className="text-xs text-gray-500">지정한 기준일 이후에 발생한 배당 내역만을 추적하여 현재의 수량으로 스냅샷을 생성합니다.</p>
                     <div className="text-xs font-semibold text-indigo-600 mt-1">마지막 자동 연동: {lastDividendSync}</div>
                   </div>
                   <button 
