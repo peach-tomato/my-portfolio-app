@@ -122,7 +122,7 @@ export default function App() {
   const [isEditingAccountName, setIsEditingAccountName] = useState(false);
   const [editAccountNameInput, setEditAccountNameInput] = useState('');
 
-  // 🌟 [추가 상태] 전체 앱 뷰 모드 ('portfolio': 포트폴리오&리밸런싱 | 'dividend': 배당금 분석&기록)
+  // 🌟 전체 앱 뷰 모드 ('portfolio': 포트폴리오&리밸런싱 | 'dividend': 배당금 분석&기록)
   const [subViewMode, setSubViewMode] = useState('portfolio');
 
   // 실시간 주가 및 연동 환율 저장소
@@ -174,7 +174,7 @@ export default function App() {
     };
   });
 
-  // 🌟 [추가 상태] 계좌별 실제 배당금 수령 기록 보관용 맵 데이터베이스
+  // 🌟 계좌별 실제 배당금 수령 기록 보관용 맵 데이터베이스
   const [dividendsMap, setDividendsMap] = useState(() => {
     const saved = localStorage.getItem('dividendsMap');
     if (saved) return JSON.parse(saved);
@@ -391,7 +391,6 @@ export default function App() {
               ...existing,
               quantity: newQty,
               avgPrice: newCost / newQty,
-              // 배당금도 기존 선언 수치가 있다면 이를 마이그레이션 및 동기화합니다.
               dividendPerShare: item.dividendPerShare !== undefined ? item.dividendPerShare : existing.dividendPerShare
             };
           } else {
@@ -429,33 +428,34 @@ export default function App() {
     return targetWeightsMap[activeAccountId] || {};
   }, [targetWeightsMap, activeAccountId]);
 
-  // 🌟 [추가 연산] 현재 활성화된 계좌의 실제 배당 수령 기록 추출
+  // 🌟 현재 활성화된 계좌의 실제 배당 수령 기록 추출
   const currentDividends = useMemo(() => {
     if (activeAccountId === 'all') {
       const combined = [];
       Object.entries(dividendsMap).forEach(([accId, divList]) => {
         const accName = accounts.find(a => a.id === accId)?.name || '기타 계좌';
-        divList.forEach(d => {
-          combined.push({ ...d, accName });
-        });
+        if (Array.isArray(divList)) {
+          divList.forEach(d => {
+            combined.push({ ...d, accName, accId });
+          });
+        }
       });
       return combined.sort((a, b) => b.date.localeCompare(a.date));
     }
     return dividendsMap[activeAccountId] || [];
   }, [dividendsMap, activeAccountId, accounts]);
 
-  // 🌟 [추가 연산] 예상 연간 배당 현황 통계 연산
+  // 🌟 예상 연간 배당 현황 통계 연산
   const dividendSummary = useMemo(() => {
     let estAnnualDividendKRW = 0;
     
     currentPortfolio.forEach(item => {
-      // 인라인으로 입력된 배당금 우선 사용, 없으면 디폴트 사전 DB값으로 백업 계산
       const divPerShare = item.dividendPerShare !== undefined ? item.dividendPerShare : getDefaultDividend(item.id);
       const rate = item.currency === 'USD' ? exchangeRate : 1;
       estAnnualDividendKRW += (item.quantity * divPerShare * rate);
     });
 
-    const netAnnualDividendKRW = estAnnualDividendKRW * 0.846; // 금융소득 원천징수 일반세율인 15.4%를 공제한 세후 금액
+    const netAnnualDividendKRW = estAnnualDividendKRW * 0.846; 
     const monthlyAverageDividendKRW = estAnnualDividendKRW / 12;
     const portfolioYield = totalAssets > 0 ? (estAnnualDividendKRW / totalAssets) : 0;
 
@@ -467,21 +467,20 @@ export default function App() {
     };
   }, [currentPortfolio, marketPrices, exchangeRate, totalAssets]);
 
-  // 🌟 [추가 연산] 월별 배당금 수령 통계 데이터 포맷팅 (차트용)
+  // 🌟 월별 배당금 수령 통계 데이터 포맷팅 (차트용)
   const monthlyReceivedChartData = useMemo(() => {
     const monthlyMap = {};
     
     currentDividends.forEach(d => {
-      // YYYY-MM-DD 형식을 YYYY-MM 형식으로 추출하여 취합
       const monthStr = d.date.slice(0, 7);
-      const amountKRW = d.amount; // 수령액은 원화 기준 적립
+      const amountKRW = d.amount; 
       monthlyMap[monthStr] = (monthlyMap[monthStr] || 0) + amountKRW;
     });
 
     return Object.entries(monthlyMap)
       .map(([month, amount]) => ({ month, '수령 배당금': amount }))
       .sort((a, b) => a.month.localeCompare(b.month))
-      .slice(-12); // 최근 최대 12개월 분량만 그래프에 출력
+      .slice(-12); 
   }, [currentDividends]);
 
   // 자산 현황 요약용 (원금, 평가액, 손익액 계산)
@@ -616,7 +615,7 @@ export default function App() {
   // [거래 및 배당 관리] 10. 주식 매매 및 배당금 처리 핵심 함수들
   // =========================================================================
   
-  // 🌟 [배당금 인라인 수정 기능] 주당 배당금(연간) 데이터를 즉각 반영합니다.
+  // [배당금 인라인 수정 기능] 주당 배당금(연간) 데이터를 즉각 반영합니다.
   const handleEditDividendClick = (stock) => {
     if (activeAccountId === 'all') return;
     setEditingDividendId(stock.id);
@@ -647,7 +646,7 @@ export default function App() {
     setEditingDividendId(null);
   };
 
-  // 🌟 [배당금 수령 기록 추가 기능]
+  // [배당금 수령 기록 추가 기능]
   const handleAddReceivedDividend = () => {
     if (activeAccountId === 'all') {
       alert('종합 요약 화면에서는 직접 배당 수령 내역을 기록할 수 없습니다. 개별 계좌 중 하나를 선택해 주세요!');
@@ -676,8 +675,8 @@ export default function App() {
       stockId: matchedStock.id,
       stockName: matchedStock.name,
       date: dividendInputDate,
-      amount: finalAmountKRW, // 원화 합산 기준액
-      displayAmount: amount,  // 원화 혹은 USD 원본 기준액
+      amount: finalAmountKRW, 
+      displayAmount: amount,  
       currency: matchedStock.currency
     };
 
@@ -689,11 +688,10 @@ export default function App() {
       };
     });
 
-    // 폼 입력 초기화
     setDividendInputAmount('');
   };
 
-  // 🌟 [배당금 수령 기록 삭제 기능]
+  // [배당금 수령 기록 삭제 기능]
   const handleRemoveReceivedDividend = (recordId, accId = activeAccountId) => {
     const targetKey = activeAccountId === 'all' ? accId : activeAccountId;
     const confirmDelete = window.confirm('해당 배당 수령 기록을 정말로 영구 소멸시키겠습니까?');
@@ -797,7 +795,7 @@ export default function App() {
     }));
   };
 
-  // 매월 축적식 자산 등락 상황 저장 핸들러
+  // 매월 수동 기록 핸들러
   const handleRecordAssets = () => {
     if (activeAccountId === 'all') {
       alert('종합 탭에서는 임의로 합계 데이터를 주입할 수 없습니다. 개별 주머니 계좌에서 각각 기록을 등록해 주시면, 종합 그래프가 알아서 통합 자산을 도출해냅니다.');
@@ -818,9 +816,6 @@ export default function App() {
     
     setHistories(prev => ({ ...prev, [activeAccountId]: updatedHist }));
   };
-
-  // 등락 컬러 조건문
-  const getProfitColor = (value) => value > 0 ? 'text-red-500' : value < 0 ? 'text-blue-500' : 'text-gray-600';
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 p-4 md:p-8 font-sans">
@@ -874,7 +869,7 @@ export default function App() {
               </button>
             </div>
 
-            {/* 계좌 이름 편집 및 영구 제거 컨트롤 */}
+            {/* 계좌 이름 편집 및 제거 컨트롤 */}
             {activeAccountId !== 'all' && (
               <div className="flex items-center space-x-2 border-t md:border-t-0 pt-3 md:pt-0 border-gray-100">
                 {isEditingAccountName ? (
@@ -902,7 +897,7 @@ export default function App() {
                       <span>이름 수정</span>
                     </button>
                     <button
-                      onClick={DeleteAccount}
+                      onClick={handleDeleteAccount} // 🌟 'DeleteAccount' -> 'handleDeleteAccount' 오타 전면 교정 완료
                       className="flex items-center space-x-1 px-2.5 py-1.5 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -915,7 +910,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* 🌟 서브 뷰 탐색 메뉴 (포트폴리오 vs 배당 분석 탭 전환) */}
+        {/* 서브 뷰 탐색 메뉴 (포트폴리오 vs 배당 분석) */}
         <div className="flex border-b border-gray-200 bg-white rounded-xl shadow-sm overflow-hidden">
           <button 
             onClick={() => setSubViewMode('portfolio')} 
@@ -933,12 +928,9 @@ export default function App() {
           </button>
         </div>
 
-        {/* ==========================================================
-            [서브 뷰: 1] 포트폴리오 & 리밸런싱 메뉴
-            ========================================================== */}
+        {/* [서브 뷰: 1] 포트폴리오 & 리밸런싱 메뉴 */}
         {subViewMode === 'portfolio' && (
           <>
-            {/* 종합 평가 대시보드 리포트 */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                 <span className="text-gray-500 text-sm font-medium mb-1 block">
@@ -968,7 +960,7 @@ export default function App() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
                 
-                {/* 거래 입력 인터페이스 */}
+                {/* 거래 입력 */}
                 {activeAccountId === 'all' ? (
                   <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-100 text-center">
                     <p className="text-sm font-medium text-indigo-700">
@@ -1200,7 +1192,7 @@ export default function App() {
               </div>
 
               <div className="space-y-6">
-                {/* 자산 수동 기록 아카이브 */}
+                {/* 자산 수동 기록 */}
                 {activeAccountId === 'all' ? (
                   <div className="bg-gray-100 p-6 rounded-2xl text-center border border-gray-200 text-gray-500 text-sm">
                     📉 종합 계좌 상태에서는 자산 기록이 불가능합니다. 개별 계좌에서 기록을 적립하시면 종합 그래프가 자동 합산 설계되어 나타납니다.
