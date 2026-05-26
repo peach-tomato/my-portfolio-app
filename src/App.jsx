@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Plus, Trash2, TrendingUp, TrendingDown, Calendar, PieChart, Activity, RefreshCw, Scale, Loader2, FolderPlus, Edit3, Check, X, CreditCard, Coins, CheckCircle2 } from 'lucide-react';
+import { Search, Plus, Trash2, TrendingUp, TrendingDown, Calendar, PieChart, Activity, RefreshCw, Scale, Loader2, FolderPlus, Edit3, Check, X, CreditCard, Coins, CheckCircle2, DollarSign } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 // =========================================================================
 // [설정] 1. 초즉시 반응형 로컬 인기 종목 사전
 // =========================================================================
 const POPULAR_STOCKS = [
+  { id: '465640.KS', name: 'ACE 미국하이일드액티브(H)', currency: 'KRW', exchange: 'KSC' }, 
   { id: '0008S0.KS', name: 'TIGER 미국배당다우존스타겟데일리커버드콜', currency: 'KRW', exchange: 'KSC' },
   { id: '482730.KS', name: 'TIGER 미국30년국채코액티브(H)', currency: 'KRW', exchange: 'KSC' },
   { id: '479010.KS', name: 'SOL 미국배당다우존스', currency: 'KRW', exchange: 'KSC' },
@@ -25,6 +26,7 @@ const POPULAR_STOCKS = [
 // [설정] 2. 기초 종목별 연간 디폴트 주당 배당금 정의 데이터베이스
 // =========================================================================
 const getDefaultDividend = (symbol) => {
+  if (symbol.startsWith('465640')) return 800; 
   if (symbol.startsWith('0008S0')) return 1020; 
   if (symbol.startsWith('005930')) return 1440; 
   if (symbol.startsWith('000660')) return 1200; 
@@ -42,7 +44,6 @@ const getDefaultDividend = (symbol) => {
   return symbol.endsWith('.KS') || symbol.endsWith('.KQ') ? 100 : 0.50; 
 };
 
-// 화폐 포맷 유틸 함수
 const formatCurrency = (value) => {
   if (value === undefined || value === null) return '0원';
   return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 }).format(value) + '원';
@@ -57,9 +58,8 @@ const formatPercent = (value) => {
   return (value * 100).toFixed(2) + '%';
 };
 
-// 스마트 CORS 우회 API 호출 함수
 const fetchYahooAPI = async (targetUrl) => {
-  const cacheBuster = `&nocache=${Date.now()}`;
+  const cacheBuster = targetUrl.includes('?') ? `&nocache=${Date.now()}` : `?nocache=${Date.now()}`;
   const finalUrl = targetUrl + cacheBuster;
   
   try {
@@ -69,103 +69,37 @@ const fetchYahooAPI = async (targetUrl) => {
       return JSON.parse(text);
     }
   } catch (e) {
-    console.warn('1차 초고속 프록시 지연으로 인해 2차 보안 우회 회선으로 백업 가동합니다.', e);
+    console.warn('1차 프록시 지연으로 백업 가동');
   }
 
   try {
     const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(finalUrl)}`);
     if (res.ok) {
       const data = await res.json();
-      if (data && data.contents) {
-        return JSON.parse(data.contents);
-      }
+      if (data && data.contents) return JSON.parse(data.contents);
     }
   } catch (err) {
-    console.error('모든 우회 서버가 응답하지 않습니다. 네트워크 확인이 필요합니다.', err);
+    console.error('프록시 호출 실패', err);
     return null;
   }
 };
 
 export default function App() {
-  // =========================================================================
-  // [상태 관리] 3. 다중 계좌 시스템 - 로컬 스토리지 데이터 동기화
-  // =========================================================================
-  const [accounts, setAccounts] = useState(() => {
-    const saved = localStorage.getItem('portfolioAccounts');
-    if (saved) return JSON.parse(saved);
-    return [
-      { id: 'acc-default', name: '일반 주식 계좌' },
-      { id: 'acc-pension', name: '연금 저축' }
-    ];
-  });
-
-  const [activeAccountId, setActiveAccountId] = useState(() => {
-    const saved = localStorage.getItem('portfolioActiveAccountId');
-    return saved || 'acc-default';
-  });
-
+  const [accounts, setAccounts] = useState(() => JSON.parse(localStorage.getItem('portfolioAccounts')) || [{ id: 'acc-default', name: '일반 주식 계좌' }, { id: 'acc-pension', name: '연금 저축' }]);
+  const [activeAccountId, setActiveAccountId] = useState(() => localStorage.getItem('portfolioActiveAccountId') || 'acc-default');
   const [isEditingAccountName, setIsEditingAccountName] = useState(false);
   const [editAccountNameInput, setEditAccountNameInput] = useState('');
-
   const [subViewMode, setSubViewMode] = useState('portfolio');
   const [marketPrices, setMarketPrices] = useState({});
   const [exchangeRate, setExchangeRate] = useState(1350.00); 
 
-  const [portfolios, setPortfolios] = useState(() => {
-    const saved = localStorage.getItem('portfoliosMap');
-    if (saved) return JSON.parse(saved);
-
-    const oldPortfolio = localStorage.getItem('portfolioData');
-    if (oldPortfolio) {
-      return { 'acc-default': JSON.parse(oldPortfolio) };
-    }
-    return {
-      'acc-default': [],
-      'acc-pension': []
-    };
-  });
-
-  const [histories, setHistories] = useState(() => {
-    const saved = localStorage.getItem('historiesMap');
-    if (saved) return JSON.parse(saved);
-
-    const oldHistory = localStorage.getItem('portfolioHistory');
-    if (oldHistory) {
-      return { 'acc-default': JSON.parse(oldHistory) };
-    }
-    return {
-      'acc-default': [],
-      'acc-pension': []
-    };
-  });
-
-  const [targetWeightsMap, setTargetWeightsMap] = useState(() => {
-    const saved = localStorage.getItem('targetWeightsMap');
-    if (saved) return JSON.parse(saved);
-
-    const oldWeights = localStorage.getItem('portfolioTargetWeights');
-    if (oldWeights) {
-      return { 'acc-default': JSON.parse(oldWeights) };
-    }
-    return {
-      'acc-default': {},
-      'acc-pension': {}
-    };
-  });
-
-  const [dividendsMap, setDividendsMap] = useState(() => {
-    const saved = localStorage.getItem('dividendsMap');
-    if (saved) return JSON.parse(saved);
-    return {
-      'acc-default': [],
-      'acc-pension': []
-    };
-  });
+  const [portfolios, setPortfolios] = useState(() => JSON.parse(localStorage.getItem('portfoliosMap')) || { 'acc-default': [], 'acc-pension': [] });
+  const [histories, setHistories] = useState(() => JSON.parse(localStorage.getItem('historiesMap')) || { 'acc-default': [], 'acc-pension': [] });
+  const [targetWeightsMap, setTargetWeightsMap] = useState(() => JSON.parse(localStorage.getItem('targetWeightsMap')) || { 'acc-default': {}, 'acc-pension': {} });
+  const [dividendsMap, setDividendsMap] = useState(() => JSON.parse(localStorage.getItem('dividendsMap')) || { 'acc-default': [], 'acc-pension': [] });
 
   const [isSyncingDividends, setIsSyncingDividends] = useState(false);
-  const [lastDividendSync, setLastDividendSync] = useState(() => {
-    return localStorage.getItem('lastDividendSync') || '미실행';
-  });
+  const [lastDividendSync, setLastDividendSync] = useState(() => localStorage.getItem('lastDividendSync') || '미실행');
 
   const [modalAlert, setModalAlert] = useState(null); 
   const [modalConfirm, setModalConfirm] = useState(null); 
@@ -189,9 +123,10 @@ export default function App() {
   const [recordDate, setRecordDate] = useState(new Date().toISOString().slice(0, 7)); 
   const isFirstRender = useRef(true);
 
-  // =========================================================================
-  // [동기화] 4. 상태 변화 감지 및 브라우저 로컬 저장 자동 처리
-  // =========================================================================
+  // 🌟 [신규 상태] 사용자가 추가로 입금하려는 투자금액을 저장하는 상태입니다.
+  // 이 금액이 입력되면, 리밸런싱 계산기가 이 금액을 포함하여 목표 매수 수량을 계산합니다.
+  const [additionalDeposit, setAdditionalDeposit] = useState('');
+
   useEffect(() => { localStorage.setItem('portfolioAccounts', JSON.stringify(accounts)); }, [accounts]);
   useEffect(() => { localStorage.setItem('portfolioActiveAccountId', activeAccountId); }, [activeAccountId]);
   useEffect(() => { localStorage.setItem('portfoliosMap', JSON.stringify(portfolios)); }, [portfolios]);
@@ -199,114 +134,78 @@ export default function App() {
   useEffect(() => { localStorage.setItem('targetWeightsMap', JSON.stringify(targetWeightsMap)); }, [targetWeightsMap]);
   useEffect(() => { localStorage.setItem('dividendsMap', JSON.stringify(dividendsMap)); }, [dividendsMap]);
 
-  // =========================================================================
-  // [네트워크] 5. 실시간 달러 기준가(환율) 동기화 호출
-  // =========================================================================
+  // 🌟 [버그 방지 코멘트] 계좌를 전환할 때마다 이전 계좌에서 입력해 둔 '추가 입금액'을 0으로 초기화합니다.
+  // 다른 계좌에 엉뚱하게 돈이 합산되어 계산되는 것을 막기 위함입니다.
+  useEffect(() => {
+    setAdditionalDeposit('');
+  }, [activeAccountId]);
+
   useEffect(() => {
     const fetchExchangeRate = async () => {
       try {
         const response = await fetch('https://open.er-api.com/v6/latest/USD');
         const data = await response.json();
-        if (data && data.rates && data.rates.KRW) {
-          setExchangeRate(data.rates.KRW);
-        }
-      } catch (error) {
-        console.error('실시간 환율 가져오기 실패:', error);
-      }
+        if (data?.rates?.KRW) setExchangeRate(data.rates.KRW);
+      } catch (error) {}
     };
     fetchExchangeRate();
     const interval = setInterval(fetchExchangeRate, 60 * 60 * 1000); 
     return () => clearInterval(interval);
   }, []);
 
-  // =========================================================================
-  // [검색 엔진] 6. 다중 키워드 스마트 서치 및 로컬 매칭 통합
-  // =========================================================================
   useEffect(() => {
     if (searchQuery.length < 1 || selectedStock?.name === searchQuery) {
       setSearchResults([]);
       return;
     }
-
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
         const queryKeywords = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
-        const localFiltered = POPULAR_STOCKS.filter(stock => {
-          return queryKeywords.every(kw => 
-            stock.name.toLowerCase().includes(kw) || stock.id.toLowerCase().includes(kw)
-          );
-        });
-        
+        const localFiltered = POPULAR_STOCKS.filter(stock => queryKeywords.every(kw => stock.name.toLowerCase().includes(kw) || stock.id.toLowerCase().includes(kw)));
         setSearchResults(localFiltered);
 
         const targetUrl = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(searchQuery)}&quotesCount=10&newsCount=0`;
         const data = await fetchYahooAPI(targetUrl);
-        
         if (data && data.quotes) {
-          const apiQuotes = data.quotes
-            .filter(q => q.symbol) 
-            .map(q => {
-              let currency = 'USD';
-              if (q.symbol.endsWith('.KS') || q.symbol.endsWith('.KQ')) currency = 'KRW';
-              
-              return {
-                id: q.symbol,
-                name: q.shortname || q.longname || q.symbol,
-                currency: currency,
-                exchange: q.exchDisp
-              };
-            });
-          
+          const apiQuotes = data.quotes.filter(q => q.symbol).map(q => {
+            let currency = 'USD';
+            if (q.symbol.endsWith('.KS') || q.symbol.endsWith('.KQ')) currency = 'KRW';
+            return { id: q.symbol, name: q.shortname || q.longname || q.symbol, currency, exchange: q.exchDisp };
+          });
           setSearchResults(prev => {
             const combined = [...prev];
-            apiQuotes.forEach(apiStock => {
-              if (!combined.some(s => s.id === apiStock.id)) combined.push(apiStock);
-            });
+            apiQuotes.forEach(apiStock => { if (!combined.some(s => s.id === apiStock.id)) combined.push(apiStock); });
             return combined;
           });
         }
-      } catch (err) {
-        console.error('글로벌 종목 시세 검색 실패:', err);
-      } finally {
-        setIsSearching(false);
-      }
+      } catch (err) {} finally { setIsSearching(false); }
     }, 150); 
-
     return () => clearTimeout(timer);
   }, [searchQuery, selectedStock]);
 
-  // =========================================================================
-  // [시세 감시] 7. 등록된 자산들의 실시간 현재가 초경량 모니터링
-  // =========================================================================
   const allPortfolioSymbols = useMemo(() => {
     const symbols = new Set();
-    Object.values(portfolios).forEach(port => {
-      port.forEach(item => symbols.add(item.id));
-    });
+    Object.values(portfolios).forEach(port => port.forEach(item => symbols.add(item.id)));
     return Array.from(symbols);
   }, [portfolios]);
 
   useEffect(() => {
     const fetchPortfolioPrices = async () => {
       if (allPortfolioSymbols.length === 0) return;
-      
       let newPrices = {};
       const symbols = allPortfolioSymbols.join(',');
 
       try {
         const sparkUrl = `https://query2.finance.yahoo.com/v7/finance/spark?symbols=${symbols}&range=1d&interval=5m`;
         const data = await fetchYahooAPI(sparkUrl);
-        
         if (data && data.spark && data.spark.result) {
           data.spark.result.forEach(item => {
             const price = item.response?.[0]?.meta?.regularMarketPrice;
             if (price) newPrices[item.symbol] = price;
           });
         }
-      } catch(e) {
-        console.warn('Spark API 시도 실패, 예비 백업 차트 라인 가동...');
-      }
+      } catch(e) {}
 
       const missingSymbols = allPortfolioSymbols.filter(sym => !newPrices[sym]);
       if (missingSymbols.length > 0) {
@@ -316,25 +215,16 @@ export default function App() {
             const chartData = await fetchYahooAPI(chartUrl);
             const price = chartData?.chart?.result?.[0]?.meta?.regularMarketPrice;
             if (price) newPrices[sym] = price;
-          } catch(err) {
-            console.error(`${sym} 현재 시세 로딩 최종 포기`, err);
-          }
+          } catch(err) {}
         }));
       }
-
-      if (Object.keys(newPrices).length > 0) {
-        setMarketPrices(prev => ({ ...prev, ...newPrices }));
-      }
+      if (Object.keys(newPrices).length > 0) setMarketPrices(prev => ({ ...prev, ...newPrices }));
     };
-
     fetchPortfolioPrices(); 
     const interval = setInterval(fetchPortfolioPrices, 15000); 
     return () => clearInterval(interval);
   }, [allPortfolioSymbols]);
 
-  // =========================================================================
-  // [수학 연산] 8. 다중 계좌 데이터 처리 및 종합(합산) 계좌 가중치 연산
-  // =========================================================================
   const currentPortfolio = useMemo(() => {
     if (activeAccountId === 'all') {
       const combined = {};
@@ -344,13 +234,7 @@ export default function App() {
             const existing = combined[item.id];
             const newQty = existing.quantity + item.quantity;
             const newCost = (existing.quantity * existing.avgPrice) + (item.quantity * item.avgPrice);
-            combined[item.id] = {
-              ...existing,
-              quantity: newQty,
-              avgPrice: newCost / newQty,
-              dividendPerShare: item.dividendPerShare !== undefined ? item.dividendPerShare : existing.dividendPerShare,
-              addedAt: item.addedAt || existing.addedAt
-            };
+            combined[item.id] = { ...existing, quantity: newQty, avgPrice: newCost / newQty, dividendPerShare: item.dividendPerShare !== undefined ? item.dividendPerShare : existing.dividendPerShare, addedAt: item.addedAt || existing.addedAt };
           } else {
             combined[item.id] = { ...item };
           }
@@ -366,12 +250,8 @@ export default function App() {
       const dateMap = {};
       Object.values(histories).forEach(histList => {
         histList.forEach(h => {
-          if (dateMap[h.date]) {
-            dateMap[h.date].totalAssets += h.totalAssets;
-            dateMap[h.date].invested += h.invested;
-          } else {
-            dateMap[h.date] = { date: h.date, totalAssets: h.totalAssets, invested: h.invested };
-          }
+          if (dateMap[h.date]) { dateMap[h.date].totalAssets += h.totalAssets; dateMap[h.date].invested += h.invested; } 
+          else { dateMap[h.date] = { date: h.date, totalAssets: h.totalAssets, invested: h.invested }; }
         });
       });
       return Object.values(dateMap).sort((a, b) => a.date.localeCompare(b.date));
@@ -379,21 +259,14 @@ export default function App() {
     return histories[activeAccountId] || [];
   }, [histories, activeAccountId]);
 
-  const currentTargetWeights = useMemo(() => {
-    if (activeAccountId === 'all') return {};
-    return targetWeightsMap[activeAccountId] || {};
-  }, [targetWeightsMap, activeAccountId]);
+  const currentTargetWeights = useMemo(() => activeAccountId === 'all' ? {} : targetWeightsMap[activeAccountId] || {}, [targetWeightsMap, activeAccountId]);
 
   const currentDividends = useMemo(() => {
     if (activeAccountId === 'all') {
       const combined = [];
       Object.entries(dividendsMap).forEach(([accId, divList]) => {
         const accName = accounts.find(a => a.id === accId)?.name || '기타 계좌';
-        if (Array.isArray(divList)) {
-          divList.forEach(d => {
-            combined.push({ ...d, accName, accId });
-          });
-        }
+        if (Array.isArray(divList)) divList.forEach(d => combined.push({ ...d, accName, accId }));
       });
       return combined.sort((a, b) => b.date.localeCompare(a.date));
     }
@@ -401,13 +274,10 @@ export default function App() {
   }, [dividendsMap, activeAccountId, accounts]);
 
   const { totalInvested, totalAssets, totalProfit } = useMemo(() => {
-    let invested = 0;
-    let assets = 0;
-    
+    let invested = 0, assets = 0;
     currentPortfolio.forEach(item => {
       const currentPrice = marketPrices[item.id] || item.avgPrice;
       const rate = item.currency === 'USD' ? exchangeRate : 1;
-      
       invested += (item.quantity * item.avgPrice * rate);
       assets += (item.quantity * currentPrice * rate);
     });
@@ -418,38 +288,25 @@ export default function App() {
 
   const dividendSummary = useMemo(() => {
     let estAnnualDividendKRW = 0;
-    
     currentPortfolio.forEach(item => {
       const divPerShare = item.dividendPerShare !== undefined ? item.dividendPerShare : getDefaultDividend(item.id);
       const rate = item.currency === 'USD' ? exchangeRate : 1;
       estAnnualDividendKRW += (item.quantity * divPerShare * rate);
     });
-
     const netAnnualDividendKRW = estAnnualDividendKRW * 0.846; 
     const monthlyAverageDividendKRW = estAnnualDividendKRW / 12;
     const portfolioYield = totalAssets > 0 ? (estAnnualDividendKRW / totalAssets) : 0;
 
-    return {
-      grossAnnual: estAnnualDividendKRW,
-      netAnnual: netAnnualDividendKRW,
-      monthlyAverage: monthlyAverageDividendKRW,
-      portfolioYield: portfolioYield
-    };
+    return { grossAnnual: estAnnualDividendKRW, netAnnual: netAnnualDividendKRW, monthlyAverage: monthlyAverageDividendKRW, portfolioYield };
   }, [currentPortfolio, marketPrices, exchangeRate, totalAssets]);
 
   const monthlyReceivedChartData = useMemo(() => {
     const monthlyMap = {};
-    
     currentDividends.forEach(d => {
       const monthStr = d.date.slice(0, 7);
-      const amountKRW = d.amount; 
-      monthlyMap[monthStr] = (monthlyMap[monthStr] || 0) + amountKRW;
+      monthlyMap[monthStr] = (monthlyMap[monthStr] || 0) + d.amount;
     });
-
-    return Object.entries(monthlyMap)
-      .map(([month, amount]) => ({ month, '수령 배당금': amount }))
-      .sort((a, b) => a.month.localeCompare(b.month))
-      .slice(-12); 
+    return Object.entries(monthlyMap).map(([month, amount]) => ({ month, '수령 배당금': amount })).sort((a, b) => a.month.localeCompare(b.month)).slice(-12); 
   }, [currentDividends]);
 
   const setWeightsToCurrent = () => {
@@ -461,11 +318,7 @@ export default function App() {
       const currentValueKRW = item.quantity * currentPrice * rate;
       newWeights[item.id] = totalAssets > 0 ? Number(((currentValueKRW / totalAssets) * 100).toFixed(1)) : 0;
     });
-    
-    setTargetWeightsMap(prev => ({
-      ...prev,
-      [activeAccountId]: newWeights
-    }));
+    setTargetWeightsMap(prev => ({ ...prev, [activeAccountId]: newWeights }));
   };
 
   useEffect(() => {
@@ -479,98 +332,82 @@ export default function App() {
     if (activeAccountId === 'all') return;
     setTargetWeightsMap(prev => {
       const activeWeights = prev[activeAccountId] || {};
-      return {
-        ...prev,
-        [activeAccountId]: {
-          ...activeWeights,
-          [id]: Number(value)
-        }
-      };
+      return { ...prev, [activeAccountId]: { ...activeWeights, [id]: Number(value) } };
     });
   };
 
   const totalTargetWeight = currentPortfolio.reduce((acc, stock) => acc + (currentTargetWeights[stock.id] || 0), 0);
 
-  // =========================================================================
-  // [배당금 엔진] 8.5 🌟 100% 자동 배당금 정산/동기화 (과거 데이터 통제 및 수량 락킹)
-  // =========================================================================
   const syncAutoDividends = async () => {
     if (isSyncingDividends) return;
     setIsSyncingDividends(true);
     
     const updatedDividendsMap = { ...dividendsMap };
-    let anyNewDividends = false;
-
-    // 🌟 사용자 요청: 무조건 5월 1일 이후의 데이터만 반영되도록 시스템 최소 기준일 설정
+    const updatedPortfolios = { ...portfolios };
+    let anyChanges = false;
     const SYSTEM_START_DATE = '2026-05-01';
 
-    for (const [accId, portList] of Object.entries(portfolios)) {
+    for (const [accId, portList] of Object.entries(updatedPortfolios)) {
       if (!Array.isArray(portList) || portList.length === 0) continue;
       
       for (const stock of portList) {
         try {
-          const targetUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${stock.id}?events=div&interval=1d&range=1y`;
-          const data = await fetchYahooAPI(targetUrl);
-          const dividendsObj = data?.chart?.result?.[0]?.events?.dividends;
+          let annualDiv = 0;
+          try {
+            const summaryData = await fetchYahooAPI(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${stock.id}?modules=summaryDetail`);
+            annualDiv = summaryData?.quoteSummary?.result?.[0]?.summaryDetail?.trailingAnnualDividendRate?.raw || 0;
+          } catch(e) {}
+
+          const chartData = await fetchYahooAPI(`https://query2.finance.yahoo.com/v8/finance/chart/${stock.id}?events=div&interval=1d&range=1y`);
+          const dividendsObj = chartData?.chart?.result?.[0]?.events?.dividends;
           
           if (dividendsObj) {
-            // 주식을 처음 산 날짜가 없으면 기본값인 5월 1일로 설정
+            if (!annualDiv || annualDiv === 0) {
+               annualDiv = Object.values(dividendsObj).reduce((sum, d) => sum + d.amount, 0);
+            }
+
             const stockAddedDate = stock.addedAt || SYSTEM_START_DATE; 
             
             Object.values(dividendsObj).forEach(divEvent => {
-              const eventDateObj = new Date(divEvent.date * 1000);
-              const eventDateStr = eventDateObj.toISOString().slice(0, 10);
+              const eventDateStr = new Date(divEvent.date * 1000).toISOString().slice(0, 10);
               const todayStr = new Date().toISOString().slice(0, 10);
               
-              // 🌟 필터 1: 배당락일이 시스템 기준일(5월 1일) 이후여야 함
-              // 🌟 필터 2: 종목을 내가 매수한 날(addedAt) 이후여야 함
-              // 🌟 필터 3: 미래 날짜가 아닌 이미 발생한 날짜여야 함
               if (eventDateStr >= SYSTEM_START_DATE && eventDateStr >= stockAddedDate && eventDateStr <= todayStr) {
-                
                 const uniqueKey = `auto-${accId}-${stock.id}-${eventDateStr}`;
                 const accDivs = updatedDividendsMap[accId] || [];
-                
-                // 해당 배당 건이 장부에 이미 기록되었는지 확인
                 const isAlreadyRecorded = accDivs.some(d => d.id === uniqueKey || d.uniqueKey === uniqueKey);
                 
-                // 🌟 수량 변경 버그 예방 아키텍처:
-                // 기록되지 않은 '새로운' 배당금만 동기화합니다. 
-                // 이미 기록된 과거의 배당금(예: 5월 배당금)은 이후 사용자가 6월에 주식을 추가 매수하여 
-                // stock.quantity가 변하더라도 절대 덮어씌워지지 않고 과거 수량 그대로 영구 보존(락)됩니다.
                 if (!isAlreadyRecorded) {
                   const amountPerShare = divEvent.amount;
                   const totalAmountOriginal = stock.quantity * amountPerShare;
                   const rate = stock.currency === 'USD' ? exchangeRate : 1;
                   const totalAmountKRW = totalAmountOriginal * rate;
                   
-                  const newRecord = {
-                    id: uniqueKey,
-                    uniqueKey: uniqueKey,
-                    stockId: stock.id,
-                    stockName: stock.name,
-                    date: eventDateStr,
-                    amount: totalAmountKRW,
-                    displayAmount: totalAmountOriginal,
-                    currency: stock.currency,
-                    lockedQuantity: stock.quantity, // 🌟 이 배당을 받을 당시의 보유 수량을 명시적으로 박제(스냅샷)
-                    isAuto: true 
-                  };
-                  
-                  accDivs.unshift(newRecord); 
+                  accDivs.unshift({
+                    id: uniqueKey, uniqueKey: uniqueKey, stockId: stock.id, stockName: stock.name,
+                    date: eventDateStr, amount: totalAmountKRW, displayAmount: totalAmountOriginal,
+                    currency: stock.currency, lockedQuantity: stock.quantity, isAuto: true 
+                  });
                   updatedDividendsMap[accId] = accDivs;
-                  anyNewDividends = true;
+                  anyChanges = true;
                 }
               }
             });
           }
+
+          if (annualDiv > 0 && stock.dividendPerShare !== annualDiv) {
+             stock.dividendPerShare = annualDiv;
+             anyChanges = true;
+          }
         } catch (e) {
-          console.error(`${stock.id} 배당 자동 정산 중 예외 발생:`, e);
+          console.error(`${stock.id} 배당 딥스캔 예외 발생:`, e);
         }
       }
     }
 
-    if (anyNewDividends) {
+    if (anyChanges) {
       setDividendsMap(updatedDividendsMap);
+      setPortfolios(updatedPortfolios);
     }
     
     const nowStr = new Date().toLocaleString('ko-KR');
@@ -581,24 +418,16 @@ export default function App() {
 
   useEffect(() => {
     if (allPortfolioSymbols.length > 0 && exchangeRate > 0) {
-      const timer = setTimeout(() => {
-        syncAutoDividends();
-      }, 2000); 
+      const timer = setTimeout(() => { syncAutoDividends(); }, 2000); 
       return () => clearTimeout(timer);
     }
   }, [allPortfolioSymbols.length, exchangeRate]);
 
-  // =========================================================================
-  // [계좌 제어] 9. 동적 계좌 추가, 수정, 삭제 제어 핸들러
-  // =========================================================================
   const handleAddAccount = () => {
-    const name = prompt('새로운 투자 주머니(계좌)의 이름을 지어주세요 (예: 개인연금 IRP, ISA 계좌):');
+    const name = prompt('새로운 투자 주머니(계좌)의 이름을 지어주세요:');
     if (!name || name.trim() === '') return;
-    
     const newId = `acc-${Date.now()}`;
-    const newAccount = { id: newId, name: name.trim() };
-    
-    setAccounts([...accounts, newAccount]);
+    setAccounts([...accounts, { id: newId, name: name.trim() }]);
     setPortfolios(prev => ({ ...prev, [newId]: [] }));
     setHistories(prev => ({ ...prev, [newId]: [] }));
     setTargetWeightsMap(prev => ({ ...prev, [newId]: {} }));
@@ -610,7 +439,6 @@ export default function App() {
     if (activeAccountId === 'all') return;
     const activeAcc = accounts.find(a => a.id === activeAccountId);
     if (!activeAcc) return;
-
     setIsEditingAccountName(true);
     setEditAccountNameInput(activeAcc.name);
   };
@@ -624,151 +452,73 @@ export default function App() {
   const handleDeleteAccount = () => {
     if (activeAccountId === 'all') return;
     if (accounts.length <= 1) {
-      setModalAlert({
-        title: '삭제 차단',
-        message: '더 이상 삭제할 수 없습니다. 최소 1개의 독립 계좌는 유지되어야 합니다.'
-      });
+      setModalAlert({ title: '삭제 차단', message: '최소 1개의 독립 계좌는 유지되어야 합니다.' });
       return;
     }
-
     setModalConfirm({
       title: '계좌 영구 삭제',
-      message: `⚠️ 경고!\n"${accounts.find(a => a.id === activeAccountId)?.name}" 계좌와 그 안의 포트폴리오, 손익 및 배당 수령 기록이 영구 파괴됩니다. 정말 지우시겠습니까?`,
+      message: `"${accounts.find(a => a.id === activeAccountId)?.name}" 계좌와 기록이 영구 파괴됩니다. 지우시겠습니까?`,
       onConfirm: () => {
         const remainingAccounts = accounts.filter(a => a.id !== activeAccountId);
-        const nextActiveId = remainingAccounts[0].id;
-
         setAccounts(remainingAccounts);
-        setActiveAccountId(nextActiveId);
-
-        setPortfolios(prev => {
-          const copy = { ...prev };
-          delete copy[activeAccountId];
-          return copy;
-        });
-        setHistories(prev => {
-          const copy = { ...prev };
-          delete copy[activeAccountId];
-          return copy;
-        });
-        setTargetWeightsMap(prev => {
-          const copy = { ...prev };
-          delete copy[activeAccountId];
-          return copy;
-        });
-        setDividendsMap(prev => {
-          const copy = { ...prev };
-          delete copy[activeAccountId];
-          return copy;
-        });
+        setActiveAccountId(remainingAccounts[0].id);
+        setPortfolios(prev => { const copy = { ...prev }; delete copy[activeAccountId]; return copy; });
+        setHistories(prev => { const copy = { ...prev }; delete copy[activeAccountId]; return copy; });
+        setTargetWeightsMap(prev => { const copy = { ...prev }; delete copy[activeAccountId]; return copy; });
+        setDividendsMap(prev => { const copy = { ...prev }; delete copy[activeAccountId]; return copy; });
       }
     });
   };
 
-  // =========================================================================
-  // [거래 및 배당 관리] 10. 주식 매매 및 배당금 처리 핵심 함수들
-  // =========================================================================
   const handleEditDividendClick = (stock) => {
     if (activeAccountId === 'all') return;
     setEditingDividendId(stock.id);
-    setEditingDividendValue(
-      (stock.dividendPerShare !== undefined ? stock.dividendPerShare : getDefaultDividend(stock.id)).toString()
-    );
+    setEditingDividendValue((stock.dividendPerShare !== undefined ? stock.dividendPerShare : getDefaultDividend(stock.id)).toString());
   };
 
   const handleSaveDividendRate = (stockId) => {
     if (activeAccountId === 'all') return;
     const value = parseFloat(editingDividendValue);
     if (isNaN(value) || value < 0) {
-      setModalAlert({
-        title: '입력 값 오류',
-        message: '배당금 수치는 0 이상의 양수만 입력할 수 있습니다.'
-      });
+      setModalAlert({ title: '오류', message: '배당금 수치는 0 이상의 양수만 입력할 수 있습니다.' });
       return;
     }
-
-    const updated = portfolios[activeAccountId].map(item => {
-      if (item.id === stockId) {
-        return { ...item, dividendPerShare: value };
-      }
-      return item;
-    });
-
-    setPortfolios(prev => ({
-      ...prev,
-      [activeAccountId]: updated
-    }));
+    setPortfolios(prev => ({ ...prev, [activeAccountId]: portfolios[activeAccountId].map(item => item.id === stockId ? { ...item, dividendPerShare: value } : item) }));
     setEditingDividendId(null);
   };
 
   const handleAddReceivedDividend = () => {
     if (activeAccountId === 'all') {
-      setModalAlert({
-        title: '입력 오류',
-        message: '종합 요약 화면에서는 직접 배당 수령 내역을 기록할 수 없습니다. 개별 계좌 중 하나를 선택해 주세요!'
-      });
+      setModalAlert({ title: '입력 오류', message: '종합 화면에서는 수동 기록 불가합니다.' });
       return;
     }
     if (!dividendInputStockId || !dividendInputAmount || !dividendInputDate) {
-      setModalAlert({
-        title: '미기입 항목 존재',
-        message: '종목, 금액 및 수령 날짜를 모두 충실히 기입해 주셔야 합니다.'
-      });
+      setModalAlert({ title: '미기입', message: '종목, 금액 및 수령 날짜를 입력하세요.' });
       return;
     }
-
     const amount = parseFloat(dividendInputAmount);
-    if (isNaN(amount) || amount <= 0) {
-      setModalAlert({
-        title: '입력 값 범위 초과',
-        message: '배당 수령액은 0보다 큰 수치여야 합니다.'
-      });
-      return;
-    }
-
+    if (isNaN(amount) || amount <= 0) return;
     const matchedStock = currentPortfolio.find(p => p.id === dividendInputStockId);
     if (!matchedStock) return;
 
     const isUSD = matchedStock.currency === 'USD';
     const finalAmountKRW = isUSD ? amount * exchangeRate : amount;
-
     const newRecord = {
-      id: `div-${Date.now()}`,
-      stockId: matchedStock.id,
-      stockName: matchedStock.name,
-      date: dividendInputDate,
-      amount: finalAmountKRW, 
-      displayAmount: amount,  
-      currency: matchedStock.currency,
-      isAuto: false 
+      id: `div-${Date.now()}`, stockId: matchedStock.id, stockName: matchedStock.name,
+      date: dividendInputDate, amount: finalAmountKRW, displayAmount: amount,  
+      currency: matchedStock.currency, isAuto: false 
     };
 
-    setDividendsMap(prev => {
-      const activeList = prev[activeAccountId] || [];
-      return {
-        ...prev,
-        [activeAccountId]: [newRecord, ...activeList]
-      };
-    });
-
+    setDividendsMap(prev => ({ ...prev, [activeAccountId]: [newRecord, ...(prev[activeAccountId] || [])] }));
     setDividendInputAmount('');
   };
 
   const handleRemoveReceivedDividend = (recordId, accId = activeAccountId) => {
     const targetKey = activeAccountId === 'all' ? accId : activeAccountId;
-    
     setModalConfirm({
-      title: '배당 기록 삭제',
-      message: '해당 배당 수령 기록을 정말로 영구 소멸시키겠습니까?',
-      onConfirm: () => {
-        setDividendsMap(prev => {
-          const activeList = prev[targetKey] || [];
-          return {
-            ...prev,
-            [targetKey]: activeList.filter(d => d.id !== recordId)
-          };
-        });
-      }
+      title: '배당 삭제',
+      message: '수령 기록을 삭제하시겠습니까?',
+      onConfirm: () => setDividendsMap(prev => ({ ...prev, [targetKey]: (prev[targetKey] || []).filter(d => d.id !== recordId) }))
     });
   };
 
@@ -777,38 +527,22 @@ export default function App() {
     setSearchQuery(stock.name);
     setIsDropdownOpen(false);
     setInputAvgPrice('');
-    
     try {
-      const targetUrl = `https://query2.finance.yahoo.com/v8/finance/chart/${stock.id}?interval=1d&range=1d`;
-      const data = await fetchYahooAPI(targetUrl);
+      const data = await fetchYahooAPI(`https://query2.finance.yahoo.com/v8/finance/chart/${stock.id}?interval=1d&range=1d`);
       const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
-      if (price) {
-        setInputAvgPrice(price.toString());
-      }
-    } catch(e) {
-      console.error('실시간 매수 단가 즉시 연동에 실패했습니다.', e);
-    }
+      if (price) setInputAvgPrice(price.toString());
+    } catch(e) {}
   };
 
   const handleAddPortfolio = () => {
     if (activeAccountId === 'all') {
-      setModalAlert({
-        title: '거래 거부',
-        message: '종합 요약 화면에서는 직접 종목을 매매할 수 없습니다. 위의 개별 계좌 중 하나를 활성화하고 거래를 진행해 주세요!'
-      });
+      setModalAlert({ title: '거래 거부', message: '종합 화면에서는 매매 불가합니다. 개별 계좌를 선택하세요.' });
       return;
     }
     if (!selectedStock || !inputQuantity || !inputAvgPrice) return;
     const qty = parseFloat(inputQuantity);
     const avg = parseFloat(inputAvgPrice);
-    
-    if (qty <= 0 || avg <= 0) {
-      setModalAlert({
-        title: '입력 범위 오류',
-        message: '거래 수량과 가격은 반드시 0보다 커야 합니다.'
-      });
-      return;
-    }
+    if (qty <= 0 || avg <= 0) return;
 
     const activePort = portfolios[activeAccountId] || [];
     const existingIndex = activePort.findIndex(p => p.id === selectedStock.id);
@@ -819,32 +553,14 @@ export default function App() {
         const existing = activePort[existingIndex];
         const totalCost = (existing.quantity * existing.avgPrice) + (qty * avg);
         const newQuantity = existing.quantity + qty;
-        updatedPort[existingIndex] = { 
-          ...existing, 
-          quantity: newQuantity, 
-          avgPrice: totalCost / newQuantity,
-          addedAt: existing.addedAt || new Date().toISOString().slice(0, 10) 
-        };
+        updatedPort[existingIndex] = { ...existing, quantity: newQuantity, avgPrice: totalCost / newQuantity, addedAt: existing.addedAt || new Date().toISOString().slice(0, 10) };
       } else {
-        updatedPort.push({ 
-          id: selectedStock.id, 
-          name: selectedStock.name, 
-          quantity: qty, 
-          avgPrice: avg, 
-          currency: selectedStock.currency,
-          addedAt: new Date().toISOString().slice(0, 10) 
-        });
+        updatedPort.push({ id: selectedStock.id, name: selectedStock.name, quantity: qty, avgPrice: avg, currency: selectedStock.currency, addedAt: new Date().toISOString().slice(0, 10) });
       }
     } else {
       if (existingIndex >= 0) {
         const existing = activePort[existingIndex];
-        if (existing.quantity < qty) {
-          setModalAlert({
-            title: '매도 한도 초과',
-            message: '현재 보유량보다 많은 주식을 매도해 처분할 수 없습니다.'
-          });
-          return;
-        }
+        if (existing.quantity < qty) return;
         const newQuantity = existing.quantity - qty;
         if (newQuantity === 0) {
           updatedPort.splice(existingIndex, 1);
@@ -854,13 +570,7 @@ export default function App() {
         } else {
           updatedPort[existingIndex] = { ...existing, quantity: newQuantity };
         }
-      } else {
-        setModalAlert({
-          title: '종목 부재',
-          message: '이 주머니에는 매도할 수 있는 보유 수량이 없습니다.'
-        });
-        return;
-      }
+      } else return;
     }
 
     setPortfolios(prev => ({ ...prev, [activeAccountId]: updatedPort }));
@@ -869,52 +579,31 @@ export default function App() {
 
   const handleRemovePortfolio = (id) => {
     if (activeAccountId === 'all') {
-      setModalAlert({
-        title: '삭제 거부',
-        message: '종합 화면에서는 임의 삭제가 차단됩니다. 해당 종목을 보유한 계좌로 이동해서 제거해 주세요.'
-      });
+      setModalAlert({ title: '삭제 차단', message: '종합 화면에서는 삭제 불가합니다.' });
       return;
     }
-    
     setModalConfirm({
       title: '종목 포트폴리오 제거',
-      message: '보유 자산에서 해당 종목을 즉시 제거하시겠습니까? (거래 이력만 소멸하며, 자산기록은 유지됩니다)',
+      message: '보유 자산에서 해당 종목을 즉시 제거하시겠습니까?',
       onConfirm: () => {
-        const activePort = portfolios[activeAccountId] || [];
-        setPortfolios(prev => ({
-          ...prev,
-          [activeAccountId]: activePort.filter(p => p.id !== id)
-        }));
-
+        setPortfolios(prev => ({ ...prev, [activeAccountId]: (prev[activeAccountId] || []).filter(p => p.id !== id) }));
         const activeWeights = { ...(targetWeightsMap[activeAccountId] || {}) };
         delete activeWeights[id];
-        setTargetWeightsMap(prev => ({
-          ...prev,
-          [activeAccountId]: activeWeights
-        }));
+        setTargetWeightsMap(prev => ({ ...prev, [activeAccountId]: activeWeights }));
       }
     });
   };
 
   const handleRecordAssets = () => {
-    if (activeAccountId === 'all') {
-      setModalAlert({
-        title: '자산 기록 오류',
-        message: '종합 탭에서는 임의로 합계 데이터를 주입할 수 없습니다. 개별 주머니 계좌에서 각각 기록을 등록해 주시면, 종합 그래프가 알아서 통합 자산을 도출해냅니다.'
-      });
-      return;
-    }
+    if (activeAccountId === 'all') return;
     if (!recordDate) return;
     const activeHist = histories[activeAccountId] || [];
     const existingIndex = activeHist.findIndex(h => h.date === recordDate);
     const newRecord = { date: recordDate, totalAssets, invested: totalInvested };
     
     let updatedHist = [...activeHist];
-    if (existingIndex >= 0) {
-      updatedHist[existingIndex] = newRecord;
-    } else {
-      updatedHist.push(newRecord);
-    }
+    if (existingIndex >= 0) updatedHist[existingIndex] = newRecord;
+    else updatedHist.push(newRecord);
     updatedHist.sort((a, b) => a.date.localeCompare(b.date));
     
     setHistories(prev => ({ ...prev, [activeAccountId]: updatedHist }));
@@ -942,7 +631,6 @@ export default function App() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             
-            {/* 계좌 이동 리스트 */}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => { setActiveAccountId('all'); setIsEditingAccountName(false); }}
@@ -974,7 +662,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* 계좌 이름 편집 및 제거 컨트롤 */}
             {activeAccountId !== 'all' && (
               <div className="flex items-center space-x-2 border-t md:border-t-0 pt-3 md:pt-0 border-gray-100">
                 {isEditingAccountName ? (
@@ -1015,7 +702,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* 서브 뷰 탐색 메뉴 (포트폴리오 vs 배당 분석) */}
+        {/* 서브 뷰 탐색 메뉴 */}
         <div className="flex border-b border-gray-200 bg-white rounded-xl shadow-sm overflow-hidden">
           <button 
             onClick={() => setSubViewMode('portfolio')} 
@@ -1103,7 +790,6 @@ export default function App() {
                           />
                         </div>
                         
-                        {/* 검색 결과 드롭다운 */}
                         {isDropdownOpen && searchQuery.length >= 1 && (
                           <ul className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                             {isSearching ? (
@@ -1241,6 +927,22 @@ export default function App() {
                       <h2 className="text-lg font-bold text-gray-900 flex items-center"><Scale className="w-5 h-5 mr-2 text-indigo-500" /> 리밸런싱 계산기</h2>
                       <button onClick={setWeightsToCurrent} className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md">현재 비중 불러오기</button>
                     </div>
+
+                    {/* 🌟 [신규 UI] 추가 입금액(투자금액)을 입력받는 모듈 영역 */}
+                    {currentPortfolio.length > 0 && (
+                      <div className="flex items-center space-x-2 mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                        <DollarSign className="w-5 h-5 text-indigo-600" />
+                        <span className="text-sm font-semibold text-indigo-900">추가 투자금 배분:</span>
+                        <input
+                          type="number"
+                          className="flex-1 max-w-[200px] px-3 py-1.5 text-sm border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-right"
+                          placeholder="입금액 (원)"
+                          value={additionalDeposit}
+                          onChange={(e) => setAdditionalDeposit(e.target.value)}
+                        />
+                        <span className="text-sm text-indigo-700 font-medium">원</span>
+                      </div>
+                    )}
                     
                     {currentPortfolio.length > 0 && (
                       <div className="overflow-x-auto">
@@ -1255,11 +957,21 @@ export default function App() {
                           </thead>
                           <tbody>
                             {currentPortfolio.map(stock => {
+                              // 🌟 [핵심 계산 로직 코멘트]
+                              // 사용자가 입력한 추가 입금액이 있다면, 이를 파싱하여 총 자산에 합산시킵니다.
+                              // 이렇게 부풀려진 새로운 '목표 총 자산(targetTotalAssets)'을 기준으로
+                              // 기존에 설정해둔 % 비율에 맞게 각각의 주식을 몇 주 더 사야할지 역산해냅니다.
+                              const depositAmt = Number(additionalDeposit) || 0;
+                              const targetTotalAssets = totalAssets + depositAmt;
+
                               const currentPrice = marketPrices[stock.id] || stock.avgPrice;
                               const rate = stock.currency === 'USD' ? exchangeRate : 1;
                               const currentValueKRW = stock.quantity * currentPrice * rate;
+                              
                               const targetWeight = currentTargetWeights[stock.id] || 0;
-                              const targetValueKRW = totalAssets * (targetWeight / 100);
+                              // 부풀려진 목표 자산금액을 바탕으로 해당 종목이 도달해야 할 원화 가치 추출
+                              const targetValueKRW = targetTotalAssets * (targetWeight / 100);
+                              
                               const diffKRW = targetValueKRW - currentValueKRW;
                               const diffQty = currentPrice * rate > 0 ? diffKRW / (currentPrice * rate) : 0;
                               const roundedDiffQty = Math.round(diffQty);
@@ -1365,7 +1077,7 @@ export default function App() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
                 
-                {/* 🌟 0. 자동 배당금 동기화 상태 패널 */}
+                {/* 0. 자동 배당금 동기화 상태 패널 */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex items-center space-x-2">
@@ -1373,10 +1085,10 @@ export default function App() {
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
                       </span>
-                      <h3 className="text-md font-bold text-gray-900">배당금 실시간 자동 정산 기능</h3>
+                      <h3 className="text-md font-bold text-gray-900">배당금 실시간 전체 동기화</h3>
                     </div>
-                    <p className="text-xs text-gray-500">지정한 기준일 이후에 발생한 배당 내역만을 추적하여 현재의 수량으로 스냅샷을 생성합니다.</p>
-                    <div className="text-xs font-semibold text-indigo-600 mt-1">마지막 자동 연동: {lastDividendSync}</div>
+                    <p className="text-xs text-gray-500">야후 파이낸스망 및 차트 딥스캔 기술을 가동하여 연 배당금 갱신 및 최근 배당락 내역을 자동 생성합니다.</p>
+                    <div className="text-xs font-semibold text-indigo-600 mt-1">마지막 연동 일시: {lastDividendSync}</div>
                   </div>
                   <button 
                     onClick={syncAutoDividends}
@@ -1384,7 +1096,7 @@ export default function App() {
                     className={`flex items-center justify-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all ${isSyncingDividends ? 'opacity-70 cursor-wait' : ''}`}
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isSyncingDividends ? 'animate-spin' : ''}`} />
-                    <span>{isSyncingDividends ? '동기화 중...' : '지금 배당 동기화'}</span>
+                    <span>{isSyncingDividends ? '딥스캔 동기화 중...' : '지금 전체 동기화하기'}</span>
                   </button>
                 </div>
 
@@ -1627,9 +1339,8 @@ export default function App() {
       </div>
 
       {/* ==========================================================
-          [CORS / 이프레임 가드] 11. 🌟 리액트 커스텀 모달 알림창 마크업
+          [CORS / 이프레임 가드] 11. 🌟 리액트 커스텀 모달 알림창
           ========================================================== */}
-      {/* 1. 커스텀 단순 경고창 모달 (Alert) */}
       {modalAlert && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fadeIn">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl space-y-4 border border-gray-100">
@@ -1645,7 +1356,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 2. 커스텀 액션 선택 모달 (Confirm) */}
       {modalConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fadeIn">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl space-y-4 border border-gray-100">
