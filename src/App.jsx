@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Plus, Trash2, TrendingUp, TrendingDown, Calendar, PieChart, Activity, RefreshCw, Scale, Loader2, FolderPlus, Edit3, Check, X, CreditCard, Coins, CheckCircle2, DollarSign } from 'lucide-react';
+import { Search, Plus, Trash2, TrendingUp, TrendingDown, Calendar, PieChart, Activity, RefreshCw, Scale, Loader2, FolderPlus, Edit3, Check, X, CreditCard, Coins, CheckCircle2, DollarSign, PiggyBank } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 // =========================================================================
-// [설정] 1. 초즉시 반응형 로컬 인기 종목 사전 (🌟 티커 455660.KS 수정 완료)
+// [설정] 1. 초즉시 반응형 로컬 인기 종목 사전
 // =========================================================================
 const POPULAR_STOCKS = [
-  { id: '455660.KS', name: 'ACE 미국하이일드액티브(H)', currency: 'KRW', exchange: 'KSC' }, // 티커 수정 완료
+  { id: '455660.KS', name: 'ACE 미국하이일드액티브(H)', currency: 'KRW', exchange: 'KSC' }, 
   { id: '0008S0.KS', name: 'TIGER 미국배당다우존스타겟데일리커버드콜', currency: 'KRW', exchange: 'KSC' },
   { id: '482730.KS', name: 'TIGER 미국30년국채코액티브(H)', currency: 'KRW', exchange: 'KSC' },
   { id: '479010.KS', name: 'SOL 미국배당다우존스', currency: 'KRW', exchange: 'KSC' },
@@ -23,10 +23,10 @@ const POPULAR_STOCKS = [
 ];
 
 // =========================================================================
-// [설정] 2. 기초 종목별 연간 디폴트 주당 배당금 (네트워크 장애 대비용 최후의 보루)
+// [설정] 2. 기초 종목별 연간 디폴트 주당 배당금
 // =========================================================================
 const getDefaultDividend = (symbol) => {
-  if (symbol.startsWith('455660')) return 800; // ACE 미국하이일드액티브(H)
+  if (symbol.startsWith('455660')) return 800; 
   if (symbol.startsWith('0008S0')) return 1020; 
   if (symbol.startsWith('005930')) return 1440; 
   if (symbol.startsWith('000660')) return 1200; 
@@ -107,8 +107,11 @@ export default function App() {
   const [editingDividendId, setEditingDividendId] = useState(null);
   const [editingDividendValue, setEditingDividendValue] = useState('');
 
-  // 🌟 [추가 기능] 포트폴리오(수량/평단가) 인라인 편집 상태
-  const [editingPortfolioCell, setEditingPortfolioCell] = useState(null); // { id: stock.id, field: 'quantity' | 'avgPrice' }
+  // 🌟 배당금 '날짜' 인라인 편집 상태
+  const [editingDividendRecordId, setEditingDividendRecordId] = useState(null);
+  const [editingDividendRecordDate, setEditingDividendRecordDate] = useState('');
+
+  const [editingPortfolioCell, setEditingPortfolioCell] = useState(null); 
   const [editingPortfolioValue, setEditingPortfolioValue] = useState('');
 
   const [dividendInputStockId, setDividendInputStockId] = useState('');
@@ -285,6 +288,27 @@ export default function App() {
   }, [currentPortfolio, marketPrices, exchangeRate]);
 
   const totalROI = totalInvested > 0 ? totalProfit / totalInvested : 0;
+
+  // 🌟 [추가 기능] 연금/IRP 합산 자산 추출 로직
+  const pensionAssetsSummary = useMemo(() => {
+    let invested = 0;
+    let assets = 0;
+
+    accounts.forEach(acc => {
+      const nameUpper = acc.name.toUpperCase();
+      if (nameUpper.includes('연금') || nameUpper.includes('IRP')) {
+        const port = portfolios[acc.id] || [];
+        port.forEach(item => {
+          const currentPrice = marketPrices[item.id] || item.avgPrice;
+          const rate = item.currency === 'USD' ? exchangeRate : 1;
+          invested += (item.quantity * item.avgPrice * rate);
+          assets += (item.quantity * currentPrice * rate);
+        });
+      }
+    });
+
+    return { invested, assets, profit: assets - invested };
+  }, [accounts, portfolios, marketPrices, exchangeRate]);
 
   const dividendSummary = useMemo(() => {
     let estAnnualDividendKRW = 0;
@@ -483,6 +507,26 @@ export default function App() {
     }
     setPortfolios(prev => ({ ...prev, [activeAccountId]: portfolios[activeAccountId].map(item => item.id === stockId ? { ...item, dividendPerShare: value } : item) }));
     setEditingDividendId(null);
+  };
+
+  // 🌟 [신규 기능] 배당 날짜 인라인 편집
+  const handleEditDividendDateClick = (record) => {
+    setEditingDividendRecordId(record.id);
+    setEditingDividendRecordDate(record.date);
+  };
+
+  const handleSaveDividendDate = (accId, recordId) => {
+    if (!editingDividendRecordDate) {
+       setModalAlert({ title: '입력 오류', message: '올바른 날짜를 지정해주세요.' });
+       return;
+    }
+    setDividendsMap(prev => {
+      const activeList = prev[accId] || [];
+      const updated = activeList.map(r => r.id === recordId ? { ...r, date: editingDividendRecordDate } : r);
+      updated.sort((a, b) => b.date.localeCompare(a.date));
+      return { ...prev, [accId]: updated };
+    });
+    setEditingDividendRecordId(null);
   };
 
   const handleEditPortfolioClick = (stock, field) => {
@@ -774,6 +818,32 @@ export default function App() {
               </div>
             </div>
 
+            {/* 🌟 [신규 UI] 전체 종합 자산 탭에서만 보이는 연금/IRP 합산 대시보드 */}
+            {activeAccountId === 'all' && (
+              <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-100 rounded-2xl p-6 flex flex-col md:flex-row justify-between items-center shadow-sm">
+                 <div className="flex items-center space-x-3 mb-4 md:mb-0">
+                   <div className="p-2 bg-indigo-100 rounded-xl"><PiggyBank className="w-6 h-6 text-indigo-600" /></div>
+                   <div>
+                     <h3 className="text-sm font-bold text-indigo-900">연금 및 IRP 계좌 특별 합산</h3>
+                     <p className="text-xs text-indigo-600 font-medium">계좌 이름에 "연금" 또는 "IRP"가 포함된 자산만 따로 묶어 보여줍니다.</p>
+                   </div>
+                 </div>
+                 <div className="flex space-x-6 text-right">
+                   <div>
+                     <span className="block text-xs text-indigo-500 mb-1">연금/IRP 총 자산</span>
+                     <span className="text-lg font-bold text-indigo-900">{formatCurrency(pensionAssetsSummary.assets)}</span>
+                   </div>
+                   <div>
+                     <span className="block text-xs text-indigo-500 mb-1">평가 손익 (수익률)</span>
+                     <span className={`text-lg font-bold ${pensionAssetsSummary.profit > 0 ? 'text-red-500' : pensionAssetsSummary.profit < 0 ? 'text-blue-500' : 'text-indigo-900'}`}>
+                       {pensionAssetsSummary.profit > 0 ? '+' : ''}{formatCurrency(pensionAssetsSummary.profit)}
+                       <span className="text-sm ml-1 font-medium">({pensionAssetsSummary.invested > 0 ? formatPercent(pensionAssetsSummary.profit / pensionAssetsSummary.invested) : '0.00%'})</span>
+                     </span>
+                   </div>
+                 </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
                 
@@ -1005,21 +1075,18 @@ export default function App() {
                       <button onClick={setWeightsToCurrent} className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md">현재 비중 불러오기</button>
                     </div>
 
-                    {/* 추가 입금액 반영 기능 */}
-                    {currentPortfolio.length > 0 && (
-                      <div className="flex items-center space-x-2 mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
-                        <DollarSign className="w-5 h-5 text-indigo-600" />
-                        <span className="text-sm font-semibold text-indigo-900">추가 투자금 배분:</span>
-                        <input
-                          type="number"
-                          className="flex-1 max-w-[200px] px-3 py-1.5 text-sm border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-right"
-                          placeholder="입금액 (원)"
-                          value={additionalDeposit}
-                          onChange={(e) => setAdditionalDeposit(e.target.value)}
-                        />
-                        <span className="text-sm text-indigo-700 font-medium">원</span>
-                      </div>
-                    )}
+                    <div className="flex items-center space-x-2 mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                      <DollarSign className="w-5 h-5 text-indigo-600" />
+                      <span className="text-sm font-semibold text-indigo-900">추가 투자금 배분:</span>
+                      <input
+                        type="number"
+                        className="flex-1 max-w-[200px] px-3 py-1.5 text-sm border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-right"
+                        placeholder="입금액 (원)"
+                        value={additionalDeposit}
+                        onChange={(e) => setAdditionalDeposit(e.target.value)}
+                      />
+                      <span className="text-sm text-indigo-700 font-medium">원</span>
+                    </div>
                     
                     {currentPortfolio.length > 0 && (
                       <div className="overflow-x-auto">
@@ -1157,6 +1224,7 @@ export default function App() {
                       <h3 className="text-md font-bold text-gray-900">배당금 실시간 전체 동기화</h3>
                     </div>
                     <p className="text-xs text-gray-500">야후 파이낸스망 및 차트 딥스캔 기술을 가동하여 <span className="font-semibold text-indigo-500">연간 예상 배당금 갱신</span> 및 <span className="font-semibold text-indigo-500">최근 배당락 내역</span>을 자동 생성합니다.</p>
+                    <div className="text-xs text-gray-400 mt-0.5">※ 글로벌 API 특성상 '배당락일' 기준으로 자동 동기화됩니다. 입금일이 다를 경우 날짜를 클릭해 직접 수정해 주세요.</div>
                     <div className="text-xs font-semibold text-indigo-600 mt-1">마지막 연동 일시: {lastDividendSync}</div>
                   </div>
                   <button 
@@ -1200,7 +1268,7 @@ export default function App() {
                             const customDiv = stock.dividendPerShare !== undefined ? stock.dividendPerShare : getDefaultDividend(stock.id);
                             const estAnnualKRW = stock.quantity * customDiv * rate;
                             
-                            // 🌟 예상 배당률 계산 (실시간 주가 반영)
+                            // 🌟 예상 배당수익률 시각화 추가 
                             const currentPrice = marketPrices[stock.id] || stock.avgPrice;
                             const dividendYield = currentPrice > 0 ? (customDiv / currentPrice) * 100 : 0;
                             
@@ -1243,7 +1311,6 @@ export default function App() {
                                   )}
                                 </td>
                                 
-                                {/* 🌟 예상 배당률 셀 (수익률 표시) */}
                                 <td className="px-4 py-4 text-right font-medium text-indigo-600">
                                   {dividendYield > 0 ? `${dividendYield.toFixed(2)}%` : '0.00%'}
                                 </td>
@@ -1332,7 +1399,7 @@ export default function App() {
                       <thead className="text-xs text-gray-500 bg-gray-50 border-y border-gray-200">
                         <tr>
                           {activeAccountId === 'all' && <th className="px-4 py-3">계좌명</th>}
-                          <th className="px-4 py-3">수령일</th>
+                          <th className="px-4 py-3">배당일(수령일)</th>
                           <th className="px-4 py-3">종목명</th>
                           <th className="px-4 py-3 text-right">수령액 (원본)</th>
                           <th className="px-4 py-3 text-right">환산 수령액 (원화)</th>
@@ -1352,7 +1419,32 @@ export default function App() {
                                 {activeAccountId === 'all' && (
                                   <td className="px-4 py-4 font-semibold text-indigo-600">{div.accName}</td>
                                 )}
-                                <td className="px-4 py-4 text-gray-600">{div.date}</td>
+                                
+                                {/* 🌟 [신규 기능] 배당 날짜 인라인 수정 인터페이스 */}
+                                <td className="px-4 py-4 text-gray-600">
+                                  {editingDividendRecordId === div.id ? (
+                                    <div className="flex items-center space-x-1">
+                                      <input
+                                        type="date"
+                                        className="px-2 py-1 border border-indigo-500 rounded text-sm outline-none"
+                                        value={editingDividendRecordDate}
+                                        onChange={(e) => setEditingDividendRecordDate(e.target.value)}
+                                      />
+                                      <button onClick={() => handleSaveDividendDate(div.accId || activeAccountId, div.id)} className="p-1 bg-green-500 text-white rounded"><Check className="w-3 h-3" /></button>
+                                      <button onClick={() => setEditingDividendRecordId(null)} className="p-1 bg-gray-300 text-gray-700 rounded"><X className="w-3 h-3" /></button>
+                                    </div>
+                                  ) : (
+                                    <div 
+                                      onClick={() => handleEditDividendDateClick(div)}
+                                      className="cursor-pointer hover:text-indigo-600 border-b border-dashed border-transparent hover:border-indigo-300 inline-block transition-colors"
+                                      title="클릭하여 실제 입금일로 수정"
+                                    >
+                                      {div.date}
+                                      <Edit3 className="w-3 h-3 inline ml-1 opacity-50" />
+                                    </div>
+                                  )}
+                                </td>
+
                                 <td className="px-4 py-4 font-medium text-gray-900">
                                   <div className="flex items-center space-x-1.5">
                                     <span>{div.stockName}</span>
