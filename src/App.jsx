@@ -3,10 +3,10 @@ import { Search, Plus, Trash2, TrendingUp, TrendingDown, Calendar, PieChart, Act
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 // =========================================================================
-// [설정] 1. 초즉시 반응형 로컬 인기 종목 사전
+// [설정] 1. 초즉시 반응형 로컬 인기 종목 사전 (🌟 티커 455660.KS 수정 완료)
 // =========================================================================
 const POPULAR_STOCKS = [
-  { id: '465640.KS', name: 'ACE 미국하이일드액티브(H)', currency: 'KRW', exchange: 'KSC' }, 
+  { id: '455660.KS', name: 'ACE 미국하이일드액티브(H)', currency: 'KRW', exchange: 'KSC' }, // 티커 수정 완료
   { id: '0008S0.KS', name: 'TIGER 미국배당다우존스타겟데일리커버드콜', currency: 'KRW', exchange: 'KSC' },
   { id: '482730.KS', name: 'TIGER 미국30년국채코액티브(H)', currency: 'KRW', exchange: 'KSC' },
   { id: '479010.KS', name: 'SOL 미국배당다우존스', currency: 'KRW', exchange: 'KSC' },
@@ -23,10 +23,10 @@ const POPULAR_STOCKS = [
 ];
 
 // =========================================================================
-// [설정] 2. 기초 종목별 연간 디폴트 주당 배당금 정의 데이터베이스
+// [설정] 2. 기초 종목별 연간 디폴트 주당 배당금 (네트워크 장애 대비용 최후의 보루)
 // =========================================================================
 const getDefaultDividend = (symbol) => {
-  if (symbol.startsWith('465640')) return 800; 
+  if (symbol.startsWith('455660')) return 800; // ACE 미국하이일드액티브(H)
   if (symbol.startsWith('0008S0')) return 1020; 
   if (symbol.startsWith('005930')) return 1440; 
   if (symbol.startsWith('000660')) return 1200; 
@@ -123,8 +123,6 @@ export default function App() {
   const [recordDate, setRecordDate] = useState(new Date().toISOString().slice(0, 7)); 
   const isFirstRender = useRef(true);
 
-  // 🌟 [신규 상태] 사용자가 추가로 입금하려는 투자금액을 저장하는 상태입니다.
-  // 이 금액이 입력되면, 리밸런싱 계산기가 이 금액을 포함하여 목표 매수 수량을 계산합니다.
   const [additionalDeposit, setAdditionalDeposit] = useState('');
 
   useEffect(() => { localStorage.setItem('portfolioAccounts', JSON.stringify(accounts)); }, [accounts]);
@@ -134,8 +132,6 @@ export default function App() {
   useEffect(() => { localStorage.setItem('targetWeightsMap', JSON.stringify(targetWeightsMap)); }, [targetWeightsMap]);
   useEffect(() => { localStorage.setItem('dividendsMap', JSON.stringify(dividendsMap)); }, [dividendsMap]);
 
-  // 🌟 [버그 방지 코멘트] 계좌를 전환할 때마다 이전 계좌에서 입력해 둔 '추가 입금액'을 0으로 초기화합니다.
-  // 다른 계좌에 엉뚱하게 돈이 합산되어 계산되는 것을 막기 위함입니다.
   useEffect(() => {
     setAdditionalDeposit('');
   }, [activeAccountId]);
@@ -286,6 +282,7 @@ export default function App() {
 
   const totalROI = totalInvested > 0 ? totalProfit / totalInvested : 0;
 
+  // 🌟 예상 연간 배당 현황 통계
   const dividendSummary = useMemo(() => {
     let estAnnualDividendKRW = 0;
     currentPortfolio.forEach(item => {
@@ -338,6 +335,9 @@ export default function App() {
 
   const totalTargetWeight = currentPortfolio.reduce((acc, stock) => acc + (currentTargetWeights[stock.id] || 0), 0);
 
+  // =========================================================================
+  // [배당금 엔진] 8.5 🌟 100% 자동 배당금 정산/동기화 (딥 스캔 엔진 + 주당 배당금(예상) 자동화)
+  // =========================================================================
   const syncAutoDividends = async () => {
     if (isSyncingDividends) return;
     setIsSyncingDividends(true);
@@ -345,26 +345,22 @@ export default function App() {
     const updatedDividendsMap = { ...dividendsMap };
     const updatedPortfolios = { ...portfolios };
     let anyChanges = false;
-    const SYSTEM_START_DATE = '2026-05-01';
+    const SYSTEM_START_DATE = '2026-05-01'; // 5월부터 수집 개시
 
     for (const [accId, portList] of Object.entries(updatedPortfolios)) {
       if (!Array.isArray(portList) || portList.length === 0) continue;
       
       for (const stock of portList) {
         try {
-          let annualDiv = 0;
-          try {
-            const summaryData = await fetchYahooAPI(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${stock.id}?modules=summaryDetail`);
-            annualDiv = summaryData?.quoteSummary?.result?.[0]?.summaryDetail?.trailingAnnualDividendRate?.raw || 0;
-          } catch(e) {}
-
+          // 🚀 [1단계] 과거 1년치 배당락 데이터(events=div) 차트 API에서 전부 수집
           const chartData = await fetchYahooAPI(`https://query2.finance.yahoo.com/v8/finance/chart/${stock.id}?events=div&interval=1d&range=1y`);
           const dividendsObj = chartData?.chart?.result?.[0]?.events?.dividends;
           
+          let ttmDividendSum = 0; // 지난 12개월 배당 합산액 (TTM)
+
           if (dividendsObj) {
-            if (!annualDiv || annualDiv === 0) {
-               annualDiv = Object.values(dividendsObj).reduce((sum, d) => sum + d.amount, 0);
-            }
+            // 과거 1년치 배당 기록이 존재하면, 모든 배당금을 더하여 '예상 연 주당 배당금'을 도출합니다.
+            ttmDividendSum = Object.values(dividendsObj).reduce((sum, d) => sum + d.amount, 0);
 
             const stockAddedDate = stock.addedAt || SYSTEM_START_DATE; 
             
@@ -377,6 +373,7 @@ export default function App() {
                 const accDivs = updatedDividendsMap[accId] || [];
                 const isAlreadyRecorded = accDivs.some(d => d.id === uniqueKey || d.uniqueKey === uniqueKey);
                 
+                // 🌟 수량 변경 버그 예방 아키텍처: 배당 수령 기록 시 당시 수량을 영구 박제(락)
                 if (!isAlreadyRecorded) {
                   const amountPerShare = divEvent.amount;
                   const totalAmountOriginal = stock.quantity * amountPerShare;
@@ -395,10 +392,13 @@ export default function App() {
             });
           }
 
-          if (annualDiv > 0 && stock.dividendPerShare !== annualDiv) {
-             stock.dividendPerShare = annualDiv;
+          // 🚀 [2단계] 예상 연간 배당금(주당) 자동 갱신
+          // 야후 요약 정보보다 우리가 방금 차트에서 긁어와서 계산한 TTM 1년 합산액이 훨씬 정확하므로 이를 최우선 반영합니다.
+          if (ttmDividendSum > 0 && stock.dividendPerShare !== ttmDividendSum) {
+             stock.dividendPerShare = ttmDividendSum;
              anyChanges = true;
           }
+          
         } catch (e) {
           console.error(`${stock.id} 배당 딥스캔 예외 발생:`, e);
         }
@@ -423,6 +423,9 @@ export default function App() {
     }
   }, [allPortfolioSymbols.length, exchangeRate]);
 
+  // =========================================================================
+  // [계좌 및 거래 UI 컨트롤 핸들러들]
+  // =========================================================================
   const handleAddAccount = () => {
     const name = prompt('새로운 투자 주머니(계좌)의 이름을 지어주세요:');
     if (!name || name.trim() === '') return;
@@ -928,7 +931,7 @@ export default function App() {
                       <button onClick={setWeightsToCurrent} className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md">현재 비중 불러오기</button>
                     </div>
 
-                    {/* 🌟 [신규 UI] 추가 입금액(투자금액)을 입력받는 모듈 영역 */}
+                    {/* 추가 입금액 반영 기능 */}
                     {currentPortfolio.length > 0 && (
                       <div className="flex items-center space-x-2 mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
                         <DollarSign className="w-5 h-5 text-indigo-600" />
@@ -957,19 +960,13 @@ export default function App() {
                           </thead>
                           <tbody>
                             {currentPortfolio.map(stock => {
-                              // 🌟 [핵심 계산 로직 코멘트]
-                              // 사용자가 입력한 추가 입금액이 있다면, 이를 파싱하여 총 자산에 합산시킵니다.
-                              // 이렇게 부풀려진 새로운 '목표 총 자산(targetTotalAssets)'을 기준으로
-                              // 기존에 설정해둔 % 비율에 맞게 각각의 주식을 몇 주 더 사야할지 역산해냅니다.
                               const depositAmt = Number(additionalDeposit) || 0;
                               const targetTotalAssets = totalAssets + depositAmt;
-
                               const currentPrice = marketPrices[stock.id] || stock.avgPrice;
                               const rate = stock.currency === 'USD' ? exchangeRate : 1;
                               const currentValueKRW = stock.quantity * currentPrice * rate;
                               
                               const targetWeight = currentTargetWeights[stock.id] || 0;
-                              // 부풀려진 목표 자산금액을 바탕으로 해당 종목이 도달해야 할 원화 가치 추출
                               const targetValueKRW = targetTotalAssets * (targetWeight / 100);
                               
                               const diffKRW = targetValueKRW - currentValueKRW;
@@ -1054,7 +1051,6 @@ export default function App() {
             ========================================================== */}
         {subViewMode === 'dividend' && (
           <>
-            {/* 배당금 전용 대시보드 */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                 <span className="text-gray-500 text-sm font-medium mb-1 block">예상 연 배당금 (세전)</span>
@@ -1077,7 +1073,6 @@ export default function App() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
                 
-                {/* 0. 자동 배당금 동기화 상태 패널 */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex items-center space-x-2">
@@ -1087,7 +1082,7 @@ export default function App() {
                       </span>
                       <h3 className="text-md font-bold text-gray-900">배당금 실시간 전체 동기화</h3>
                     </div>
-                    <p className="text-xs text-gray-500">야후 파이낸스망 및 차트 딥스캔 기술을 가동하여 연 배당금 갱신 및 최근 배당락 내역을 자동 생성합니다.</p>
+                    <p className="text-xs text-gray-500">야후 파이낸스망 및 차트 딥스캔 기술을 가동하여 <span className="font-semibold text-indigo-500">연간 예상 배당금 갱신</span> 및 <span className="font-semibold text-indigo-500">최근 배당락 내역</span>을 자동 생성합니다.</p>
                     <div className="text-xs font-semibold text-indigo-600 mt-1">마지막 연동 일시: {lastDividendSync}</div>
                   </div>
                   <button 
@@ -1100,13 +1095,12 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* 1. 주당 배당금(연간) 설정 테이블 */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                   <div className="flex justify-between items-center mb-3">
                     <h2 className="text-lg font-bold text-gray-900 flex items-center">
                       <Coins className="w-5 h-5 mr-2 text-indigo-500" /> 주당 배당 설정 & 예상치
                     </h2>
-                    <span className="text-xs text-gray-400">배당 수치를 더블클릭 하거나 편집하여 최적화하세요.</span>
+                    <span className="text-xs text-gray-400">위의 '동기화'를 누르면 TTM(1년) 기준으로 자동 계산됩니다.</span>
                   </div>
 
                   <div className="overflow-x-auto">
@@ -1338,9 +1332,7 @@ export default function App() {
         
       </div>
 
-      {/* ==========================================================
-          [CORS / 이프레임 가드] 11. 🌟 리액트 커스텀 모달 알림창
-          ========================================================== */}
+      {/* 모달창들 */}
       {modalAlert && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fadeIn">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl space-y-4 border border-gray-100">
