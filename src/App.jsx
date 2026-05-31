@@ -485,14 +485,12 @@ export default function App() {
     setEditingDividendId(null);
   };
 
-  // 🌟 [추가 기능] 포트폴리오(보유량/평단가) 인라인 편집 클릭 핸들러
   const handleEditPortfolioClick = (stock, field) => {
     if (activeAccountId === 'all') return;
     setEditingPortfolioCell({ id: stock.id, field });
     setEditingPortfolioValue(stock[field].toString());
   };
 
-  // 🌟 [추가 기능] 포트폴리오(보유량/평단가) 인라인 편집 저장 핸들러
   const handleSavePortfolioCell = () => {
     if (!editingPortfolioCell || activeAccountId === 'all') return;
     const { id, field } = editingPortfolioCell;
@@ -904,7 +902,6 @@ export default function App() {
                                   </div>
                                 </td>
                                 
-                                {/* 🌟 보유 수량 인라인 편집 셀 */}
                                 <td className="px-4 py-4 text-right">
                                   {editingPortfolioCell?.id === stock.id && editingPortfolioCell?.field === 'quantity' ? (
                                     <div className="flex items-center justify-end space-x-1">
@@ -933,7 +930,6 @@ export default function App() {
 
                                 <td className="px-4 py-4 text-right font-medium text-indigo-600">{currentWeight.toFixed(1)}%</td>
                                 
-                                {/* 🌟 평단가 인라인 편집 셀 */}
                                 <td className="px-4 py-4 text-right">
                                   {editingPortfolioCell?.id === stock.id && editingPortfolioCell?.field === 'avgPrice' ? (
                                     <div className="flex items-center justify-end space-x-1">
@@ -1188,13 +1184,14 @@ export default function App() {
                           <th className="px-4 py-3">종목명</th>
                           <th className="px-4 py-3 text-right">보유량</th>
                           <th className="px-4 py-3 text-center">연 주당 배당금 (통화 기준)</th>
+                          <th className="px-4 py-3 text-right">예상 배당률</th>
                           <th className="px-4 py-3 text-right">예상 연 배당액 (원화)</th>
                         </tr>
                       </thead>
                       <tbody>
                         {currentPortfolio.length === 0 ? (
                           <tr>
-                            <td colSpan="4" className="px-4 py-6 text-center text-gray-400">보유 종목이 없어 예상 배당을 계산할 수 없습니다.</td>
+                            <td colSpan="5" className="px-4 py-6 text-center text-gray-400">보유 종목이 없어 예상 배당을 계산할 수 없습니다.</td>
                           </tr>
                         ) : (
                           currentPortfolio.map(stock => {
@@ -1202,6 +1199,10 @@ export default function App() {
                             const rate = isUSD ? exchangeRate : 1;
                             const customDiv = stock.dividendPerShare !== undefined ? stock.dividendPerShare : getDefaultDividend(stock.id);
                             const estAnnualKRW = stock.quantity * customDiv * rate;
+                            
+                            // 🌟 예상 배당률 계산 (실시간 주가 반영)
+                            const currentPrice = marketPrices[stock.id] || stock.avgPrice;
+                            const dividendYield = currentPrice > 0 ? (customDiv / currentPrice) * 100 : 0;
                             
                             return (
                               <tr key={`div-setting-${stock.id}`} className="border-b border-gray-100 hover:bg-gray-50">
@@ -1241,6 +1242,12 @@ export default function App() {
                                     </div>
                                   )}
                                 </td>
+                                
+                                {/* 🌟 예상 배당률 셀 (수익률 표시) */}
+                                <td className="px-4 py-4 text-right font-medium text-indigo-600">
+                                  {dividendYield > 0 ? `${dividendYield.toFixed(2)}%` : '0.00%'}
+                                </td>
+
                                 <td className="px-4 py-4 text-right font-bold text-gray-900">
                                   {formatCurrency(estAnnualKRW)}
                                 </td>
