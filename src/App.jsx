@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Plus, Trash2, TrendingUp, TrendingDown, Calendar, PieChart, Activity, RefreshCw, Scale, Loader2, FolderPlus, Edit3, Check, X, CreditCard, Coins, CheckCircle2, DollarSign, PiggyBank } from 'lucide-react';
+import { Search, Plus, Trash2, TrendingUp, TrendingDown, Calendar, PieChart, Activity, RefreshCw, Scale, Loader2, FolderPlus, Edit3, Check, X, CreditCard, Coins, CheckCircle2, DollarSign, PiggyBank, Briefcase } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 // =========================================================================
@@ -224,19 +224,32 @@ export default function App() {
     return () => clearInterval(interval);
   }, [allPortfolioSymbols]);
 
-  // 🌟 [신규 로직] 연금/IRP 계좌들의 ID 목록을 추출합니다.
+  // 🌟 [핵심 로직] 연금/IRP 계좌와 일반 계좌들을 필터링하기 위한 리스트 생성
   const pensionAccountIds = useMemo(() => {
     return accounts
       .filter(acc => acc.name.toUpperCase().includes('연금') || acc.name.toUpperCase().includes('IRP'))
       .map(acc => acc.id);
   }, [accounts]);
 
-  // 🌟 [수정 로직] 'all' 또는 'pension-all' 탭일 때의 합산 로직
+  const generalAccountIds = useMemo(() => {
+    return accounts
+      .filter(acc => !acc.name.toUpperCase().includes('연금') && !acc.name.toUpperCase().includes('IRP'))
+      .map(acc => acc.id);
+  }, [accounts]);
+
+  // 🌟 [통합 뷰 체크 플래그] 여러 계좌를 합산해서 보는 모드인지 판별
+  const isAggregatedView = activeAccountId === 'all' || activeAccountId === 'pension-all' || activeAccountId === 'general-all';
+
+  // [수정 로직] 'all', 'pension-all', 'general-all' 탭일 때의 합산 로직
   const currentPortfolio = useMemo(() => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') {
+    if (isAggregatedView) {
       const combined = {};
+      let targetAccountIds = [];
+      
       // 탭에 따라 합산할 대상 계좌 ID를 결정합니다.
-      const targetAccountIds = activeAccountId === 'pension-all' ? pensionAccountIds : Object.keys(portfolios);
+      if (activeAccountId === 'all') targetAccountIds = Object.keys(portfolios);
+      else if (activeAccountId === 'pension-all') targetAccountIds = pensionAccountIds;
+      else if (activeAccountId === 'general-all') targetAccountIds = generalAccountIds;
 
       targetAccountIds.forEach(accId => {
         const port = portfolios[accId] || [];
@@ -254,12 +267,16 @@ export default function App() {
       return Object.values(combined);
     }
     return portfolios[activeAccountId] || [];
-  }, [portfolios, activeAccountId, pensionAccountIds]);
+  }, [portfolios, activeAccountId, pensionAccountIds, generalAccountIds, isAggregatedView]);
 
   const currentHistory = useMemo(() => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') {
+    if (isAggregatedView) {
       const dateMap = {};
-      const targetAccountIds = activeAccountId === 'pension-all' ? pensionAccountIds : Object.keys(histories);
+      let targetAccountIds = [];
+      
+      if (activeAccountId === 'all') targetAccountIds = Object.keys(histories);
+      else if (activeAccountId === 'pension-all') targetAccountIds = pensionAccountIds;
+      else if (activeAccountId === 'general-all') targetAccountIds = generalAccountIds;
 
       targetAccountIds.forEach(accId => {
         const histList = histories[accId] || [];
@@ -271,14 +288,18 @@ export default function App() {
       return Object.values(dateMap).sort((a, b) => a.date.localeCompare(b.date));
     }
     return histories[activeAccountId] || [];
-  }, [histories, activeAccountId, pensionAccountIds]);
+  }, [histories, activeAccountId, pensionAccountIds, generalAccountIds, isAggregatedView]);
 
-  const currentTargetWeights = useMemo(() => (activeAccountId === 'all' || activeAccountId === 'pension-all') ? {} : targetWeightsMap[activeAccountId] || {}, [targetWeightsMap, activeAccountId]);
+  const currentTargetWeights = useMemo(() => isAggregatedView ? {} : targetWeightsMap[activeAccountId] || {}, [targetWeightsMap, activeAccountId, isAggregatedView]);
 
   const currentDividends = useMemo(() => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') {
+    if (isAggregatedView) {
       const combined = [];
-      const targetAccountIds = activeAccountId === 'pension-all' ? pensionAccountIds : Object.keys(dividendsMap);
+      let targetAccountIds = [];
+      
+      if (activeAccountId === 'all') targetAccountIds = Object.keys(dividendsMap);
+      else if (activeAccountId === 'pension-all') targetAccountIds = pensionAccountIds;
+      else if (activeAccountId === 'general-all') targetAccountIds = generalAccountIds;
 
       targetAccountIds.forEach(accId => {
         const divList = dividendsMap[accId] || [];
@@ -288,7 +309,7 @@ export default function App() {
       return combined.sort((a, b) => b.date.localeCompare(a.date));
     }
     return Array.isArray(dividendsMap[activeAccountId]) ? dividendsMap[activeAccountId] : [];
-  }, [dividendsMap, activeAccountId, accounts, pensionAccountIds]);
+  }, [dividendsMap, activeAccountId, accounts, pensionAccountIds, generalAccountIds, isAggregatedView]);
 
   const { totalInvested, totalAssets, totalProfit } = useMemo(() => {
     let invested = 0, assets = 0;
@@ -327,7 +348,7 @@ export default function App() {
   }, [currentDividends]);
 
   const setWeightsToCurrent = () => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') return;
+    if (isAggregatedView) return;
     const newWeights = {};
     currentPortfolio.forEach(item => {
       const currentPrice = marketPrices[item.id] || item.avgPrice;
@@ -339,14 +360,14 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (isFirstRender.current && currentPortfolio.length > 0 && totalAssets > 0 && activeAccountId !== 'all' && activeAccountId !== 'pension-all') {
+    if (isFirstRender.current && currentPortfolio.length > 0 && totalAssets > 0 && !isAggregatedView) {
       if (Object.keys(currentTargetWeights).length === 0) setWeightsToCurrent();
       isFirstRender.current = false;
     }
-  }, [totalAssets, currentPortfolio, currentTargetWeights, activeAccountId]);
+  }, [totalAssets, currentPortfolio, currentTargetWeights, activeAccountId, isAggregatedView]);
 
   const handleTargetWeightChange = (id, value) => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') return;
+    if (isAggregatedView) return;
     setTargetWeightsMap(prev => {
       const activeWeights = prev[activeAccountId] || {};
       return { ...prev, [activeAccountId]: { ...activeWeights, [id]: Number(value) } };
@@ -435,9 +456,6 @@ export default function App() {
     }
   }, [allPortfolioSymbols.length, exchangeRate]);
 
-  // =========================================================================
-  // [계좌 및 거래 UI 컨트롤 핸들러들]
-  // =========================================================================
   const handleAddAccount = () => {
     const name = prompt('새로운 투자 주머니(계좌)의 이름을 지어주세요:');
     if (!name || name.trim() === '') return;
@@ -451,7 +469,7 @@ export default function App() {
   };
 
   const handleRenameAccount = () => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') return;
+    if (isAggregatedView) return;
     const activeAcc = accounts.find(a => a.id === activeAccountId);
     if (!activeAcc) return;
     setIsEditingAccountName(true);
@@ -465,7 +483,7 @@ export default function App() {
   };
 
   const handleDeleteAccount = () => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') return;
+    if (isAggregatedView) return;
     if (accounts.length <= 1) {
       setModalAlert({ title: '삭제 차단', message: '최소 1개의 독립 계좌는 유지되어야 합니다.' });
       return;
@@ -486,13 +504,13 @@ export default function App() {
   };
 
   const handleEditDividendClick = (stock) => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') return;
+    if (isAggregatedView) return;
     setEditingDividendId(stock.id);
     setEditingDividendValue((stock.dividendPerShare !== undefined ? stock.dividendPerShare : getDefaultDividend(stock.id)).toString());
   };
 
   const handleSaveDividendRate = (stockId) => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') return;
+    if (isAggregatedView) return;
     const value = parseFloat(editingDividendValue);
     if (isNaN(value) || value < 0) {
       setModalAlert({ title: '오류', message: '배당금 수치는 0 이상의 양수만 입력할 수 있습니다.' });
@@ -522,13 +540,13 @@ export default function App() {
   };
 
   const handleEditPortfolioClick = (stock, field) => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') return;
+    if (isAggregatedView) return;
     setEditingPortfolioCell({ id: stock.id, field });
     setEditingPortfolioValue(stock[field].toString());
   };
 
   const handleSavePortfolioCell = () => {
-    if (!editingPortfolioCell || activeAccountId === 'all' || activeAccountId === 'pension-all') return;
+    if (!editingPortfolioCell || isAggregatedView) return;
     const { id, field } = editingPortfolioCell;
     const value = parseFloat(editingPortfolioValue);
 
@@ -549,7 +567,7 @@ export default function App() {
   };
 
   const handleAddReceivedDividend = () => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') {
+    if (isAggregatedView) {
       setModalAlert({ title: '입력 오류', message: '종합 화면에서는 수동 기록 불가합니다.' });
       return;
     }
@@ -575,7 +593,7 @@ export default function App() {
   };
 
   const handleRemoveReceivedDividend = (recordId, accId = activeAccountId) => {
-    const targetKey = (activeAccountId === 'all' || activeAccountId === 'pension-all') ? accId : activeAccountId;
+    const targetKey = isAggregatedView ? accId : activeAccountId;
     setModalConfirm({
       title: '배당 삭제',
       message: '수령 기록을 삭제하시겠습니까?',
@@ -596,7 +614,7 @@ export default function App() {
   };
 
   const handleAddPortfolio = () => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') {
+    if (isAggregatedView) {
       setModalAlert({ title: '거래 거부', message: '종합 화면에서는 매매 불가합니다. 개별 계좌를 선택하세요.' });
       return;
     }
@@ -639,7 +657,7 @@ export default function App() {
   };
 
   const handleRemovePortfolio = (id) => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') {
+    if (isAggregatedView) {
       setModalAlert({ title: '삭제 차단', message: '종합 화면에서는 삭제 불가합니다.' });
       return;
     }
@@ -656,7 +674,7 @@ export default function App() {
   };
 
   const handleRecordAssets = () => {
-    if (activeAccountId === 'all' || activeAccountId === 'pension-all') return;
+    if (isAggregatedView) return;
     if (!recordDate) return;
     const activeHist = histories[activeAccountId] || [];
     const existingIndex = activeHist.findIndex(h => h.date === recordDate);
@@ -701,13 +719,21 @@ export default function App() {
                 <span>📊 전체 종합 자산</span>
               </button>
 
-              {/* 🌟 [신설] 연금/IRP 통합 탭 버튼 */}
               <button
                 onClick={() => { setActiveAccountId('pension-all'); setIsEditingAccountName(false); }}
                 className={`flex items-center space-x-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${activeAccountId === 'pension-all' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
               >
                 <PiggyBank className="w-4 h-4" />
                 <span>🏦 연금/IRP 종합</span>
+              </button>
+
+              {/* 🌟 [신설] 일반 계좌 종합 탭 버튼 */}
+              <button
+                onClick={() => { setActiveAccountId('general-all'); setIsEditingAccountName(false); }}
+                className={`flex items-center space-x-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${activeAccountId === 'general-all' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+              >
+                <Briefcase className="w-4 h-4" />
+                <span>💼 일반/기타 종합</span>
               </button>
               
               <div className="w-px h-6 bg-gray-200 mx-1 hidden sm:block"></div>
@@ -732,7 +758,7 @@ export default function App() {
               </button>
             </div>
 
-            {activeAccountId !== 'all' && activeAccountId !== 'pension-all' && (
+            {!isAggregatedView && (
               <div className="flex items-center space-x-2 border-t md:border-t-0 pt-3 md:pt-0 border-gray-100">
                 {isEditingAccountName ? (
                   <div className="flex items-center space-x-1.5">
@@ -796,7 +822,7 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                 <span className="text-gray-500 text-sm font-medium mb-1 block">
-                  {activeAccountId === 'all' ? '합산 총 자산' : activeAccountId === 'pension-all' ? '연금/IRP 총 자산' : '계좌 총 자산'}
+                  {activeAccountId === 'all' ? '전체 합산 총 자산' : activeAccountId === 'pension-all' ? '연금/IRP 총 자산' : activeAccountId === 'general-all' ? '일반/기타 총 자산' : '계좌 총 자산'}
                 </span>
                 <span className="text-2xl font-bold text-gray-900">{formatCurrency(totalAssets)}</span>
               </div>
@@ -823,10 +849,10 @@ export default function App() {
               <div className="lg:col-span-2 space-y-6">
                 
                 {/* 거래 입력 */}
-                {(activeAccountId === 'all' || activeAccountId === 'pension-all') ? (
+                {isAggregatedView ? (
                   <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-100 text-center">
                     <p className="text-sm font-medium text-indigo-700">
-                      💡 <strong>{activeAccountId === 'pension-all' ? '연금/IRP 종합' : '전체 종합'} 자산 요약 화면</strong>입니다. 주식을 매매하시려면 상단 탭에서 <strong>개별 계좌</strong>를 눌러 선택해 주세요!
+                      💡 <strong>{activeAccountId === 'all' ? '전체 종합' : activeAccountId === 'pension-all' ? '연금/IRP 종합' : '일반/기타 종합'} 자산 요약 화면</strong>입니다. 주식을 매매하시려면 상단 탭에서 <strong>개별 계좌</strong>를 눌러 선택해 주세요!
                     </p>
                   </div>
                 ) : (
@@ -860,6 +886,7 @@ export default function App() {
                           />
                         </div>
                         
+                        {/* 검색 결과 드롭다운 */}
                         {isDropdownOpen && searchQuery.length >= 1 && (
                           <ul className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                             {isSearching ? (
@@ -963,12 +990,12 @@ export default function App() {
                                     </div>
                                   ) : (
                                     <div 
-                                      onClick={() => (activeAccountId !== 'all' && activeAccountId !== 'pension-all') && handleEditPortfolioClick(stock, 'quantity')} 
-                                      className={`inline-flex items-center justify-end space-x-1 group ${(activeAccountId !== 'all' && activeAccountId !== 'pension-all') ? 'cursor-pointer' : ''}`}
-                                      title={(activeAccountId === 'all' || activeAccountId === 'pension-all') ? "개별 계좌 탭에서 편집이 가능합니다." : "클릭하여 보유 수량 수정"}
+                                      onClick={() => !isAggregatedView && handleEditPortfolioClick(stock, 'quantity')} 
+                                      className={`inline-flex items-center justify-end space-x-1 group ${!isAggregatedView ? 'cursor-pointer' : ''}`}
+                                      title={isAggregatedView ? "개별 계좌 탭에서 편집이 가능합니다." : "클릭하여 보유 수량 수정"}
                                     >
                                       <span>{stock.quantity.toFixed(2).replace(/\.00$/, '')}주</span>
-                                      {(activeAccountId !== 'all' && activeAccountId !== 'pension-all') && <Edit3 className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                                      {!isAggregatedView && <Edit3 className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />}
                                     </div>
                                   )}
                                 </td>
@@ -991,15 +1018,15 @@ export default function App() {
                                     </div>
                                   ) : (
                                     <div 
-                                      onClick={() => (activeAccountId !== 'all' && activeAccountId !== 'pension-all') && handleEditPortfolioClick(stock, 'avgPrice')}
-                                      className={`inline-flex items-start justify-end space-x-1 group ${(activeAccountId !== 'all' && activeAccountId !== 'pension-all') ? 'cursor-pointer' : ''}`}
-                                      title={(activeAccountId === 'all' || activeAccountId === 'pension-all') ? "개별 계좌 탭에서 편집이 가능합니다." : "클릭하여 평단가 수정"}
+                                      onClick={() => !isAggregatedView && handleEditPortfolioClick(stock, 'avgPrice')}
+                                      className={`inline-flex items-start justify-end space-x-1 group ${!isAggregatedView ? 'cursor-pointer' : ''}`}
+                                      title={isAggregatedView ? "개별 계좌 탭에서 편집이 가능합니다." : "클릭하여 평단가 수정"}
                                     >
                                       <div className="flex flex-col items-end">
                                         <span>{isUSD ? formatUSD(stock.avgPrice) : formatCurrency(stock.avgPrice)}</span>
                                         {isUSD && <span className="text-[11px] text-gray-400 mt-0.5">({formatCurrency(stock.avgPrice * rate)})</span>}
                                       </div>
-                                      {(activeAccountId !== 'all' && activeAccountId !== 'pension-all') && <Edit3 className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5" />}
+                                      {!isAggregatedView && <Edit3 className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5" />}
                                     </div>
                                   )}
                                 </td>
@@ -1023,8 +1050,8 @@ export default function App() {
                                 <td className="px-4 py-4 text-center">
                                   <button 
                                     onClick={() => handleRemovePortfolio(stock.id)} 
-                                    disabled={(activeAccountId === 'all' || activeAccountId === 'pension-all')}
-                                    className={`transition-colors ${(activeAccountId === 'all' || activeAccountId === 'pension-all') ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-500'}`}
+                                    disabled={isAggregatedView}
+                                    className={`transition-colors ${isAggregatedView ? 'text-gray-200 cursor-not-allowed' : 'text-gray-400 hover:text-red-500'}`}
                                   >
                                     <Trash2 className="w-5 h-5 mx-auto" />
                                   </button>
@@ -1039,7 +1066,7 @@ export default function App() {
                 </div>
 
                 {/* 리밸런싱 계산기 */}
-                {(activeAccountId === 'all' || activeAccountId === 'pension-all') ? (
+                {isAggregatedView ? (
                   <div className="bg-gray-100 p-6 rounded-2xl text-center border border-gray-200 text-gray-500 text-sm">
                     📌 리밸런싱 계산 기능은 개별 계좌에서 독립된 목표에 도달하도록 보조합니다. 위의 개별 계좌 탭 중 하나를 선택해 주세요.
                   </div>
@@ -1050,20 +1077,18 @@ export default function App() {
                       <button onClick={setWeightsToCurrent} className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md">현재 비중 불러오기</button>
                     </div>
 
-                    {currentPortfolio.length > 0 && (
-                      <div className="flex items-center space-x-2 mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
-                        <DollarSign className="w-5 h-5 text-indigo-600" />
-                        <span className="text-sm font-semibold text-indigo-900">추가 투자금 배분:</span>
-                        <input
-                          type="number"
-                          className="flex-1 max-w-[200px] px-3 py-1.5 text-sm border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-right"
-                          placeholder="입금액 (원)"
-                          value={additionalDeposit}
-                          onChange={(e) => setAdditionalDeposit(e.target.value)}
-                        />
-                        <span className="text-sm text-indigo-700 font-medium">원</span>
-                      </div>
-                    )}
+                    <div className="flex items-center space-x-2 mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+                      <DollarSign className="w-5 h-5 text-indigo-600" />
+                      <span className="text-sm font-semibold text-indigo-900">추가 투자금 배분:</span>
+                      <input
+                        type="number"
+                        className="flex-1 max-w-[200px] px-3 py-1.5 text-sm border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-right"
+                        placeholder="입금액 (원)"
+                        value={additionalDeposit}
+                        onChange={(e) => setAdditionalDeposit(e.target.value)}
+                      />
+                      <span className="text-sm text-indigo-700 font-medium">원</span>
+                    </div>
                     
                     {currentPortfolio.length > 0 && (
                       <div className="overflow-x-auto">
@@ -1125,7 +1150,7 @@ export default function App() {
 
               <div className="space-y-6">
                 {/* 자산 수동 기록 */}
-                {(activeAccountId === 'all' || activeAccountId === 'pension-all') ? (
+                {isAggregatedView ? (
                   <div className="bg-gray-100 p-6 rounded-2xl text-center border border-gray-200 text-gray-500 text-sm">
                     📉 종합 계좌 상태에서는 자산 기록이 불가능합니다. 개별 계좌에서 기록을 적립하시면 종합 그래프가 자동 합산 설계되어 나타납니다.
                   </div>
@@ -1143,7 +1168,7 @@ export default function App() {
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-[400px] flex flex-col">
                   <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
                     <TrendingUp className="w-5 h-5 mr-2 text-indigo-500" /> 
-                    {activeAccountId === 'all' ? '전체 종합 자산 추이' : activeAccountId === 'pension-all' ? '연금/IRP 종합 자산 추이' : '자산 등락 추이'}
+                    {activeAccountId === 'all' ? '전체 종합 자산 추이' : activeAccountId === 'pension-all' ? '연금/IRP 자산 추이' : activeAccountId === 'general-all' ? '일반/기타 자산 추이' : '자산 등락 추이'}
                   </h2>
                   <div className="flex-1 w-full min-h-0">
                     <ResponsiveContainer width="100%" height="100%">
@@ -1201,7 +1226,6 @@ export default function App() {
                       <h3 className="text-md font-bold text-gray-900">배당금 실시간 전체 동기화</h3>
                     </div>
                     <p className="text-xs text-gray-500">야후 파이낸스망 및 차트 딥스캔 기술을 가동하여 <span className="font-semibold text-indigo-500">연간 예상 배당금 갱신</span> 및 <span className="font-semibold text-indigo-500">최근 배당락 내역</span>을 자동 생성합니다.</p>
-                    <div className="text-xs text-gray-400 mt-0.5">※ 글로벌 API 특성상 '배당락일' 기준으로 자동 동기화됩니다. 입금일이 다를 경우 날짜를 클릭해 직접 수정해 주세요.</div>
                     <div className="text-xs font-semibold text-indigo-600 mt-1">마지막 연동 일시: {lastDividendSync}</div>
                   </div>
                   <button 
@@ -1229,14 +1253,13 @@ export default function App() {
                           <th className="px-4 py-3">종목명</th>
                           <th className="px-4 py-3 text-right">보유량</th>
                           <th className="px-4 py-3 text-center">연 주당 배당금 (통화 기준)</th>
-                          <th className="px-4 py-3 text-right">예상 배당률</th>
                           <th className="px-4 py-3 text-right">예상 연 배당액 (원화)</th>
                         </tr>
                       </thead>
                       <tbody>
                         {currentPortfolio.length === 0 ? (
                           <tr>
-                            <td colSpan="5" className="px-4 py-6 text-center text-gray-400">보유 종목이 없어 예상 배당을 계산할 수 없습니다.</td>
+                            <td colSpan="4" className="px-4 py-6 text-center text-gray-400">보유 종목이 없어 예상 배당을 계산할 수 없습니다.</td>
                           </tr>
                         ) : (
                           currentPortfolio.map(stock => {
@@ -1244,9 +1267,6 @@ export default function App() {
                             const rate = isUSD ? exchangeRate : 1;
                             const customDiv = stock.dividendPerShare !== undefined ? stock.dividendPerShare : getDefaultDividend(stock.id);
                             const estAnnualKRW = stock.quantity * customDiv * rate;
-                            
-                            const currentPrice = marketPrices[stock.id] || stock.avgPrice;
-                            const dividendYield = currentPrice > 0 ? (customDiv / currentPrice) * 100 : 0;
                             
                             return (
                               <tr key={`div-setting-${stock.id}`} className="border-b border-gray-100 hover:bg-gray-50">
@@ -1277,20 +1297,15 @@ export default function App() {
                                     </div>
                                   ) : (
                                     <div 
-                                      onClick={() => (activeAccountId !== 'all' && activeAccountId !== 'pension-all') && handleEditDividendClick(stock)}
-                                      className={`inline-flex items-center space-x-1 px-3 py-1 rounded-lg border border-dashed text-sm font-semibold cursor-pointer ${(activeAccountId === 'all' || activeAccountId === 'pension-all') ? 'border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed' : 'border-gray-200 hover:border-indigo-500 hover:bg-indigo-50 text-indigo-600'}`}
-                                      title={(activeAccountId === 'all' || activeAccountId === 'pension-all') ? "개별 계좌 탭에서 편집이 가능합니다." : "클릭하여 주당 배당금 직접 수정"}
+                                      onClick={() => !isAggregatedView && handleEditDividendClick(stock)}
+                                      className={`inline-flex items-center space-x-1 px-3 py-1 rounded-lg border border-dashed text-sm font-semibold cursor-pointer ${isAggregatedView ? 'border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed' : 'border-gray-200 hover:border-indigo-500 hover:bg-indigo-50 text-indigo-600'}`}
+                                      title={isAggregatedView ? "개별 계좌 탭에서 편집이 가능합니다." : "클릭하여 주당 배당금 직접 수정"}
                                     >
                                       <span>{isUSD ? formatUSD(customDiv) : formatCurrency(customDiv)}</span>
-                                      {(activeAccountId !== 'all' && activeAccountId !== 'pension-all') && <Edit3 className="w-3 h-3 text-gray-400" />}
+                                      {!isAggregatedView && <Edit3 className="w-3 h-3 text-gray-400" />}
                                     </div>
                                   )}
                                 </td>
-                                
-                                <td className="px-4 py-4 text-right font-medium text-indigo-600">
-                                  {dividendYield > 0 ? `${dividendYield.toFixed(2)}%` : '0.00%'}
-                                </td>
-
                                 <td className="px-4 py-4 text-right font-bold text-gray-900">
                                   {formatCurrency(estAnnualKRW)}
                                 </td>
@@ -1304,7 +1319,7 @@ export default function App() {
                 </div>
 
                 {/* 2. 실제 배당금 수령 기록 입력 폼 */}
-                {(activeAccountId === 'all' || activeAccountId === 'pension-all') ? (
+                {isAggregatedView ? (
                   <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-100 text-center">
                     <p className="text-sm font-medium text-indigo-700">
                       💡 종합 자산 보기 상태입니다. 수동으로 배당금을 직접 기입하시려면 상단에서 <strong>개별 계좌</strong>를 선택해 주세요.
@@ -1374,7 +1389,7 @@ export default function App() {
                     <table className="w-full text-sm text-left whitespace-nowrap">
                       <thead className="text-xs text-gray-500 bg-gray-50 border-y border-gray-200">
                         <tr>
-                          {(activeAccountId === 'all' || activeAccountId === 'pension-all') && <th className="px-4 py-3">계좌명</th>}
+                          {isAggregatedView && <th className="px-4 py-3">계좌명</th>}
                           <th className="px-4 py-3">배당일(수령일)</th>
                           <th className="px-4 py-3">종목명</th>
                           <th className="px-4 py-3 text-right">수령액 (원본)</th>
@@ -1385,14 +1400,14 @@ export default function App() {
                       <tbody>
                         {currentDividends.length === 0 ? (
                           <tr>
-                            <td colSpan={(activeAccountId === 'all' || activeAccountId === 'pension-all') ? 6 : 5} className="px-4 py-8 text-center text-gray-400">수령된 배당 내역이 존재하지 않습니다.</td>
+                            <td colSpan={isAggregatedView ? 6 : 5} className="px-4 py-8 text-center text-gray-400">수령된 배당 내역이 존재하지 않습니다.</td>
                           </tr>
                         ) : (
                           currentDividends.map(div => {
                             const isUSD = div.currency === 'USD';
                             return (
                               <tr key={div.id} className="border-b border-gray-100 hover:bg-gray-50">
-                                {(activeAccountId === 'all' || activeAccountId === 'pension-all') && (
+                                {isAggregatedView && (
                                   <td className="px-4 py-4 font-semibold text-indigo-600">{div.accName}</td>
                                 )}
                                 
