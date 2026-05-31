@@ -107,6 +107,10 @@ export default function App() {
   const [editingDividendId, setEditingDividendId] = useState(null);
   const [editingDividendValue, setEditingDividendValue] = useState('');
 
+  // 🌟 [추가 기능] 포트폴리오(수량/평단가) 인라인 편집 상태
+  const [editingPortfolioCell, setEditingPortfolioCell] = useState(null); // { id: stock.id, field: 'quantity' | 'avgPrice' }
+  const [editingPortfolioValue, setEditingPortfolioValue] = useState('');
+
   const [dividendInputStockId, setDividendInputStockId] = useState('');
   const [dividendInputAmount, setDividendInputAmount] = useState('');
   const [dividendInputDate, setDividendInputDate] = useState(new Date().toISOString().slice(0, 10)); 
@@ -282,7 +286,6 @@ export default function App() {
 
   const totalROI = totalInvested > 0 ? totalProfit / totalInvested : 0;
 
-  // 🌟 예상 연간 배당 현황 통계
   const dividendSummary = useMemo(() => {
     let estAnnualDividendKRW = 0;
     currentPortfolio.forEach(item => {
@@ -335,9 +338,6 @@ export default function App() {
 
   const totalTargetWeight = currentPortfolio.reduce((acc, stock) => acc + (currentTargetWeights[stock.id] || 0), 0);
 
-  // =========================================================================
-  // [배당금 엔진] 8.5 🌟 100% 자동 배당금 정산/동기화 (딥 스캔 엔진 + 주당 배당금(예상) 자동화)
-  // =========================================================================
   const syncAutoDividends = async () => {
     if (isSyncingDividends) return;
     setIsSyncingDividends(true);
@@ -345,21 +345,19 @@ export default function App() {
     const updatedDividendsMap = { ...dividendsMap };
     const updatedPortfolios = { ...portfolios };
     let anyChanges = false;
-    const SYSTEM_START_DATE = '2026-05-01'; // 5월부터 수집 개시
+    const SYSTEM_START_DATE = '2026-05-01'; 
 
     for (const [accId, portList] of Object.entries(updatedPortfolios)) {
       if (!Array.isArray(portList) || portList.length === 0) continue;
       
       for (const stock of portList) {
         try {
-          // 🚀 [1단계] 과거 1년치 배당락 데이터(events=div) 차트 API에서 전부 수집
           const chartData = await fetchYahooAPI(`https://query2.finance.yahoo.com/v8/finance/chart/${stock.id}?events=div&interval=1d&range=1y`);
           const dividendsObj = chartData?.chart?.result?.[0]?.events?.dividends;
           
-          let ttmDividendSum = 0; // 지난 12개월 배당 합산액 (TTM)
+          let ttmDividendSum = 0; 
 
           if (dividendsObj) {
-            // 과거 1년치 배당 기록이 존재하면, 모든 배당금을 더하여 '예상 연 주당 배당금'을 도출합니다.
             ttmDividendSum = Object.values(dividendsObj).reduce((sum, d) => sum + d.amount, 0);
 
             const stockAddedDate = stock.addedAt || SYSTEM_START_DATE; 
@@ -373,7 +371,6 @@ export default function App() {
                 const accDivs = updatedDividendsMap[accId] || [];
                 const isAlreadyRecorded = accDivs.some(d => d.id === uniqueKey || d.uniqueKey === uniqueKey);
                 
-                // 🌟 수량 변경 버그 예방 아키텍처: 배당 수령 기록 시 당시 수량을 영구 박제(락)
                 if (!isAlreadyRecorded) {
                   const amountPerShare = divEvent.amount;
                   const totalAmountOriginal = stock.quantity * amountPerShare;
@@ -392,8 +389,6 @@ export default function App() {
             });
           }
 
-          // 🚀 [2단계] 예상 연간 배당금(주당) 자동 갱신
-          // 야후 요약 정보보다 우리가 방금 차트에서 긁어와서 계산한 TTM 1년 합산액이 훨씬 정확하므로 이를 최우선 반영합니다.
           if (ttmDividendSum > 0 && stock.dividendPerShare !== ttmDividendSum) {
              stock.dividendPerShare = ttmDividendSum;
              anyChanges = true;
@@ -488,6 +483,35 @@ export default function App() {
     }
     setPortfolios(prev => ({ ...prev, [activeAccountId]: portfolios[activeAccountId].map(item => item.id === stockId ? { ...item, dividendPerShare: value } : item) }));
     setEditingDividendId(null);
+  };
+
+  // 🌟 [추가 기능] 포트폴리오(보유량/평단가) 인라인 편집 클릭 핸들러
+  const handleEditPortfolioClick = (stock, field) => {
+    if (activeAccountId === 'all') return;
+    setEditingPortfolioCell({ id: stock.id, field });
+    setEditingPortfolioValue(stock[field].toString());
+  };
+
+  // 🌟 [추가 기능] 포트폴리오(보유량/평단가) 인라인 편집 저장 핸들러
+  const handleSavePortfolioCell = () => {
+    if (!editingPortfolioCell || activeAccountId === 'all') return;
+    const { id, field } = editingPortfolioCell;
+    const value = parseFloat(editingPortfolioValue);
+
+    if (isNaN(value) || value < 0) {
+      setModalAlert({ title: '입력 값 오류', message: '0 이상의 올바른 숫자를 입력해주세요.' });
+      return;
+    }
+
+    const updated = portfolios[activeAccountId].map(item => {
+      if (item.id === id) {
+        return { ...item, [field]: value };
+      }
+      return item;
+    });
+
+    setPortfolios(prev => ({ ...prev, [activeAccountId]: updated }));
+    setEditingPortfolioCell(null);
   };
 
   const handleAddReceivedDividend = () => {
@@ -879,12 +903,66 @@ export default function App() {
                                     <span className="text-[10px] text-gray-400">{stock.id.replace('.KS', '').replace('.KQ', '')} {isUSD && <span className="ml-1 text-blue-500 font-semibold">미국</span>}</span>
                                   </div>
                                 </td>
-                                <td className="px-4 py-4 text-right">{stock.quantity.toFixed(2).replace(/\.00$/, '')}주</td>
-                                <td className="px-4 py-4 text-right font-medium text-indigo-600">{currentWeight.toFixed(1)}%</td>
+                                
+                                {/* 🌟 보유 수량 인라인 편집 셀 */}
                                 <td className="px-4 py-4 text-right">
-                                  {isUSD ? formatUSD(stock.avgPrice) : formatCurrency(stock.avgPrice)}
-                                  {isUSD && <div className="text-[11px] text-gray-400 mt-0.5">({formatCurrency(stock.avgPrice * rate)})</div>}
+                                  {editingPortfolioCell?.id === stock.id && editingPortfolioCell?.field === 'quantity' ? (
+                                    <div className="flex items-center justify-end space-x-1">
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        className="w-20 px-1.5 py-0.5 border border-indigo-500 rounded text-right text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                        value={editingPortfolioValue}
+                                        onChange={(e) => setEditingPortfolioValue(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleSavePortfolioCell()}
+                                      />
+                                      <button onClick={handleSavePortfolioCell} className="p-1 bg-green-500 text-white rounded hover:bg-green-600"><Check className="w-3 h-3" /></button>
+                                      <button onClick={() => setEditingPortfolioCell(null)} className="p-1 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"><X className="w-3 h-3" /></button>
+                                    </div>
+                                  ) : (
+                                    <div 
+                                      onClick={() => activeAccountId !== 'all' && handleEditPortfolioClick(stock, 'quantity')} 
+                                      className={`inline-flex items-center justify-end space-x-1 group ${activeAccountId !== 'all' ? 'cursor-pointer' : ''}`}
+                                      title={activeAccountId === 'all' ? "개별 계좌 탭에서 편집이 가능합니다." : "클릭하여 보유 수량 수정"}
+                                    >
+                                      <span>{stock.quantity.toFixed(2).replace(/\.00$/, '')}주</span>
+                                      {activeAccountId !== 'all' && <Edit3 className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                                    </div>
+                                  )}
                                 </td>
+
+                                <td className="px-4 py-4 text-right font-medium text-indigo-600">{currentWeight.toFixed(1)}%</td>
+                                
+                                {/* 🌟 평단가 인라인 편집 셀 */}
+                                <td className="px-4 py-4 text-right">
+                                  {editingPortfolioCell?.id === stock.id && editingPortfolioCell?.field === 'avgPrice' ? (
+                                    <div className="flex items-center justify-end space-x-1">
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        className="w-24 px-1.5 py-0.5 border border-indigo-500 rounded text-right text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                        value={editingPortfolioValue}
+                                        onChange={(e) => setEditingPortfolioValue(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleSavePortfolioCell()}
+                                      />
+                                      <button onClick={handleSavePortfolioCell} className="p-1 bg-green-500 text-white rounded hover:bg-green-600"><Check className="w-3 h-3" /></button>
+                                      <button onClick={() => setEditingPortfolioCell(null)} className="p-1 bg-gray-300 text-gray-700 rounded hover:bg-gray-400"><X className="w-3 h-3" /></button>
+                                    </div>
+                                  ) : (
+                                    <div 
+                                      onClick={() => activeAccountId !== 'all' && handleEditPortfolioClick(stock, 'avgPrice')}
+                                      className={`inline-flex items-start justify-end space-x-1 group ${activeAccountId !== 'all' ? 'cursor-pointer' : ''}`}
+                                      title={activeAccountId === 'all' ? "개별 계좌 탭에서 편집이 가능합니다." : "클릭하여 평단가 수정"}
+                                    >
+                                      <div className="flex flex-col items-end">
+                                        <span>{isUSD ? formatUSD(stock.avgPrice) : formatCurrency(stock.avgPrice)}</span>
+                                        {isUSD && <span className="text-[11px] text-gray-400 mt-0.5">({formatCurrency(stock.avgPrice * rate)})</span>}
+                                      </div>
+                                      {activeAccountId !== 'all' && <Edit3 className="w-3 h-3 text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5" />}
+                                    </div>
+                                  )}
+                                </td>
+
                                 <td className="px-4 py-4 text-right">
                                   {!isPriceLoaded ? (
                                    <span className="text-xs text-gray-400 flex justify-end items-center"><Loader2 className="w-3 h-3 animate-spin mr-1"/>조회중</span>
