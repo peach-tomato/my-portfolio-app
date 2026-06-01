@@ -224,7 +224,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, [allPortfolioSymbols]);
 
-  // 🌟 [핵심 로직] 연금/IRP 계좌와 일반 계좌들을 필터링하기 위한 리스트 생성
   const pensionAccountIds = useMemo(() => {
     return accounts
       .filter(acc => acc.name.toUpperCase().includes('연금') || acc.name.toUpperCase().includes('IRP'))
@@ -237,16 +236,13 @@ export default function App() {
       .map(acc => acc.id);
   }, [accounts]);
 
-  // 🌟 [통합 뷰 체크 플래그] 여러 계좌를 합산해서 보는 모드인지 판별
   const isAggregatedView = activeAccountId === 'all' || activeAccountId === 'pension-all' || activeAccountId === 'general-all';
 
-  // [수정 로직] 'all', 'pension-all', 'general-all' 탭일 때의 합산 로직
   const currentPortfolio = useMemo(() => {
     if (isAggregatedView) {
       const combined = {};
       let targetAccountIds = [];
       
-      // 탭에 따라 합산할 대상 계좌 ID를 결정합니다.
       if (activeAccountId === 'all') targetAccountIds = Object.keys(portfolios);
       else if (activeAccountId === 'pension-all') targetAccountIds = pensionAccountIds;
       else if (activeAccountId === 'general-all') targetAccountIds = generalAccountIds;
@@ -694,7 +690,6 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 text-gray-800 p-4 md:p-8 font-sans">
       <div className="max-w-5xl mx-auto space-y-6">
         
-        {/* 헤더 */}
         <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-2 gap-4">
           <div className="flex items-center space-x-3">
             <Activity className="w-8 h-8 text-indigo-600" />
@@ -706,7 +701,6 @@ export default function App() {
           </div>
         </header>
 
-        {/* 🌟 다중 계좌 통합 이동 탭 메뉴 */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             
@@ -727,7 +721,6 @@ export default function App() {
                 <span>🏦 연금/IRP 종합</span>
               </button>
 
-              {/* 🌟 [신설] 일반 계좌 종합 탭 버튼 */}
               <button
                 onClick={() => { setActiveAccountId('general-all'); setIsEditingAccountName(false); }}
                 className={`flex items-center space-x-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${activeAccountId === 'general-all' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
@@ -798,7 +791,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 서브 뷰 탐색 메뉴 */}
         <div className="flex border-b border-gray-200 bg-white rounded-xl shadow-sm overflow-hidden">
           <button 
             onClick={() => setSubViewMode('portfolio')} 
@@ -816,7 +808,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* [서브 뷰: 1] 포트폴리오 & 리밸런싱 메뉴 */}
         {subViewMode === 'portfolio' && (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -848,7 +839,6 @@ export default function App() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 space-y-6">
                 
-                {/* 거래 입력 */}
                 {isAggregatedView ? (
                   <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-100 text-center">
                     <p className="text-sm font-medium text-indigo-700">
@@ -886,7 +876,6 @@ export default function App() {
                           />
                         </div>
                         
-                        {/* 검색 결과 드롭다운 */}
                         {isDropdownOpen && searchQuery.length >= 1 && (
                           <ul className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
                             {isSearching ? (
@@ -926,7 +915,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* 보유 종목 리스트 */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                   <div className="flex justify-between items-center mb-4">
                     <h2 className="text-lg font-bold text-gray-900 flex items-center"><PieChart className="w-5 h-5 mr-2 text-indigo-500" /> 보유 종목 현황</h2>
@@ -1065,7 +1053,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 리밸런싱 계산기 */}
                 {isAggregatedView ? (
                   <div className="bg-gray-100 p-6 rounded-2xl text-center border border-gray-200 text-gray-500 text-sm">
                     📌 리밸런싱 계산 기능은 개별 계좌에서 독립된 목표에 도달하도록 보조합니다. 위의 개별 계좌 탭 중 하나를 선택해 주세요.
@@ -1149,7 +1136,6 @@ export default function App() {
               </div>
 
               <div className="space-y-6">
-                {/* 자산 수동 기록 */}
                 {isAggregatedView ? (
                   <div className="bg-gray-100 p-6 rounded-2xl text-center border border-gray-200 text-gray-500 text-sm">
                     📉 종합 계좌 상태에서는 자산 기록이 불가능합니다. 개별 계좌에서 기록을 적립하시면 종합 그래프가 자동 합산 설계되어 나타납니다.
@@ -1164,7 +1150,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* 자산 등락 추이 시계열 차트 */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-[400px] flex flex-col">
                   <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
                     <TrendingUp className="w-5 h-5 mr-2 text-indigo-500" /> 
@@ -1189,9 +1174,6 @@ export default function App() {
           </>
         )}
 
-        {/* ==========================================================
-            [서브 뷰: 2] 🌟 배당금 분석 & 기록 메뉴
-            ========================================================== */}
         {subViewMode === 'dividend' && (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1226,6 +1208,7 @@ export default function App() {
                       <h3 className="text-md font-bold text-gray-900">배당금 실시간 전체 동기화</h3>
                     </div>
                     <p className="text-xs text-gray-500">야후 파이낸스망 및 차트 딥스캔 기술을 가동하여 <span className="font-semibold text-indigo-500">연간 예상 배당금 갱신</span> 및 <span className="font-semibold text-indigo-500">최근 배당락 내역</span>을 자동 생성합니다.</p>
+                    <div className="text-xs text-gray-400 mt-0.5">※ 글로벌 API 특성상 '배당락일' 기준으로 자동 동기화됩니다. 입금일이 다를 경우 날짜를 클릭해 직접 수정해 주세요.</div>
                     <div className="text-xs font-semibold text-indigo-600 mt-1">마지막 연동 일시: {lastDividendSync}</div>
                   </div>
                   <button 
@@ -1253,13 +1236,14 @@ export default function App() {
                           <th className="px-4 py-3">종목명</th>
                           <th className="px-4 py-3 text-right">보유량</th>
                           <th className="px-4 py-3 text-center">연 주당 배당금 (통화 기준)</th>
+                          <th className="px-4 py-3 text-right">예상 배당률</th>
                           <th className="px-4 py-3 text-right">예상 연 배당액 (원화)</th>
                         </tr>
                       </thead>
                       <tbody>
                         {currentPortfolio.length === 0 ? (
                           <tr>
-                            <td colSpan="4" className="px-4 py-6 text-center text-gray-400">보유 종목이 없어 예상 배당을 계산할 수 없습니다.</td>
+                            <td colSpan="5" className="px-4 py-6 text-center text-gray-400">보유 종목이 없어 예상 배당을 계산할 수 없습니다.</td>
                           </tr>
                         ) : (
                           currentPortfolio.map(stock => {
@@ -1267,6 +1251,9 @@ export default function App() {
                             const rate = isUSD ? exchangeRate : 1;
                             const customDiv = stock.dividendPerShare !== undefined ? stock.dividendPerShare : getDefaultDividend(stock.id);
                             const estAnnualKRW = stock.quantity * customDiv * rate;
+                            
+                            const currentPrice = marketPrices[stock.id] || stock.avgPrice;
+                            const dividendYield = currentPrice > 0 ? (customDiv / currentPrice) * 100 : 0;
                             
                             return (
                               <tr key={`div-setting-${stock.id}`} className="border-b border-gray-100 hover:bg-gray-50">
@@ -1306,6 +1293,11 @@ export default function App() {
                                     </div>
                                   )}
                                 </td>
+                                
+                                <td className="px-4 py-4 text-right font-medium text-indigo-600">
+                                  {dividendYield > 0 ? `${dividendYield.toFixed(2)}%` : '0.00%'}
+                                </td>
+
                                 <td className="px-4 py-4 text-right font-bold text-gray-900">
                                   {formatCurrency(estAnnualKRW)}
                                 </td>
@@ -1318,7 +1310,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 2. 실제 배당금 수령 기록 입력 폼 */}
                 {isAggregatedView ? (
                   <div className="bg-indigo-50 p-6 rounded-2xl border border-indigo-100 text-center">
                     <p className="text-sm font-medium text-indigo-700">
@@ -1380,7 +1371,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* 3. 최근 배당 수령 내역 리스트 */}
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                   <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
                     <Calendar className="w-5 h-5 mr-2 text-indigo-500" /> 최근 배당금 수령 내역
@@ -1393,6 +1383,7 @@ export default function App() {
                           <th className="px-4 py-3">배당일(수령일)</th>
                           <th className="px-4 py-3">종목명</th>
                           <th className="px-4 py-3 text-right">수령액 (원본)</th>
+                          <th className="px-4 py-3 text-right">지급 배당률</th>
                           <th className="px-4 py-3 text-right">환산 수령액 (원화)</th>
                           <th className="px-4 py-3 text-center">관리</th>
                         </tr>
@@ -1400,11 +1391,20 @@ export default function App() {
                       <tbody>
                         {currentDividends.length === 0 ? (
                           <tr>
-                            <td colSpan={isAggregatedView ? 6 : 5} className="px-4 py-8 text-center text-gray-400">수령된 배당 내역이 존재하지 않습니다.</td>
+                            <td colSpan={isAggregatedView ? 7 : 6} className="px-4 py-8 text-center text-gray-400">수령된 배당 내역이 존재하지 않습니다.</td>
                           </tr>
                         ) : (
                           currentDividends.map(div => {
                             const isUSD = div.currency === 'USD';
+                            
+                            // 🌟 해당 건의 배당률(수익률) 계산 
+                            // 현재 종목 정보나 당시 보유수량을 기준으로, 이번에 들어온 배당금이 주가의 몇 %에 해당하는지 추적합니다.
+                            const matchedStock = currentPortfolio.find(p => p.id === div.stockId);
+                            const refPrice = marketPrices[div.stockId] || matchedStock?.avgPrice || 0;
+                            const qty = div.lockedQuantity || matchedStock?.quantity || 0;
+                            const payoutPerShare = qty > 0 ? div.displayAmount / qty : 0;
+                            const payoutYield = refPrice > 0 ? (payoutPerShare / refPrice) * 100 : 0;
+
                             return (
                               <tr key={div.id} className="border-b border-gray-100 hover:bg-gray-50">
                                 {isAggregatedView && (
@@ -1449,6 +1449,12 @@ export default function App() {
                                 <td className="px-4 py-4 text-right font-medium">
                                   {isUSD ? formatUSD(div.displayAmount) : formatCurrency(div.displayAmount)}
                                 </td>
+                                
+                                {/* 🌟 지급 배당률 표시 영역 */}
+                                <td className="px-4 py-4 text-right font-medium text-indigo-600">
+                                  {payoutYield > 0 ? `${payoutYield.toFixed(2)}%` : '-'}
+                                </td>
+
                                 <td className="px-4 py-4 text-right font-bold text-green-600">
                                   {formatCurrency(div.amount)}
                                 </td>
@@ -1470,7 +1476,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 오른쪽 차트 섹션 */}
               <div className="space-y-6">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-[400px] flex flex-col">
                   <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
@@ -1499,7 +1504,6 @@ export default function App() {
         
       </div>
 
-      {/* 모달창들 */}
       {modalAlert && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-fadeIn">
           <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl space-y-4 border border-gray-100">
