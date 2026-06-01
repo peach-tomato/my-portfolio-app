@@ -139,16 +139,39 @@ export default function App() {
     setAdditionalDeposit('');
   }, [activeAccountId]);
 
+  // 🌟 환율 데이터 듀얼 엔진으로 무결성 보장
   useEffect(() => {
     const fetchExchangeRate = async () => {
+      let isSuccess = false;
+      
+      // 1순위: exchangerate-api (최신, 가장 빠름)
       try {
-        const response = await fetch('https://open.er-api.com/v6/latest/USD');
-        const data = await response.json();
-        if (data?.rates?.KRW) setExchangeRate(data.rates.KRW);
-      } catch (error) {}
+        const response1 = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+        const data1 = await response1.json();
+        if (data1 && data1.rates && data1.rates.KRW) {
+          setExchangeRate(data1.rates.KRW);
+          isSuccess = true;
+        }
+      } catch (error) {
+        console.warn('1순위 환율 API 응답 지연. 2순위 서버로 재시도합니다.', error);
+      }
+
+      // 2순위: open.er-api (기존 백업용)
+      if (!isSuccess) {
+        try {
+          const response2 = await fetch('https://open.er-api.com/v6/latest/USD');
+          const data2 = await response2.json();
+          if (data2 && data2.rates && data2.rates.KRW) {
+            setExchangeRate(data2.rates.KRW);
+          }
+        } catch (error) {
+          console.error('모든 환율 API 서버가 응답하지 않습니다.', error);
+        }
+      }
     };
+
     fetchExchangeRate();
-    const interval = setInterval(fetchExchangeRate, 60 * 60 * 1000); 
+    const interval = setInterval(fetchExchangeRate, 60 * 60 * 1000); // 1시간 간격 업데이트
     return () => clearInterval(interval);
   }, []);
 
@@ -1476,6 +1499,7 @@ export default function App() {
                 </div>
               </div>
 
+              {/* 오른쪽 차트 섹션 */}
               <div className="space-y-6">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-[400px] flex flex-col">
                   <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
