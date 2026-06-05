@@ -59,9 +59,21 @@ const formatPercent = (value) => {
 };
 
 const fetchYahooAPI = async (targetUrl) => {
-  const cacheBuster = targetUrl.includes('?') ? `&nocache=${Date.now()}` : `?nocache=${Date.now()}`;
-  const finalUrl = targetUrl + cacheBuster;
+  const finalUrl = targetUrl;
   
+  // 1. 자체 프록시 서버리스 함수 / 로컬 프록시 호출 시도 (가장 빠름)
+  try {
+    const proxyUrl = `/api/yahoo?url=${encodeURIComponent(finalUrl)}`;
+    const res = await fetch(proxyUrl);
+    if (res.ok) {
+      const data = await res.json();
+      return data;
+    }
+  } catch (e) {
+    console.warn('자체 프록시 호출 실패, 공개 프록시로 대체합니다.', e);
+  }
+
+  // 2. Fallback 1: corsproxy.io
   try {
     const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(finalUrl)}`);
     if (res.ok) {
@@ -70,6 +82,7 @@ const fetchYahooAPI = async (targetUrl) => {
     }
   } catch (e) {}
 
+  // 3. Fallback 2: allorigins
   try {
     const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(finalUrl)}`);
     if (res.ok) {
@@ -88,6 +101,10 @@ export default function App() {
   const [editAccountNameInput, setEditAccountNameInput] = useState('');
   const [subViewMode, setSubViewMode] = useState('portfolio');
   const [marketPrices, setMarketPrices] = useState({});
+  const marketPricesRef = useRef(marketPrices);
+  useEffect(() => {
+    marketPricesRef.current = marketPrices;
+  }, [marketPrices]);
   const [exchangeRate, setExchangeRate] = useState(1350.00); 
 
   const [portfolios, setPortfolios] = useState(() => JSON.parse(localStorage.getItem('portfoliosMap')) || { 'acc-default': [], 'acc-pension': [] });
@@ -229,7 +246,8 @@ export default function App() {
         }
       } catch(e) {}
 
-      const missingSymbols = allPortfolioSymbols.filter(sym => !newPrices[sym]);
+      // 이미 가격이 존재하는 종목은 개별 API 폴백(chart API) 호출을 건너뛰어 동시 요청 폭증 및 API 차단을 방지합니다.
+      const missingSymbols = allPortfolioSymbols.filter(sym => !newPrices[sym] && !marketPricesRef.current[sym]);
       if (missingSymbols.length > 0) {
         await Promise.all(missingSymbols.map(async (sym) => {
           try {
@@ -243,7 +261,7 @@ export default function App() {
       if (Object.keys(newPrices).length > 0) setMarketPrices(prev => ({ ...prev, ...newPrices }));
     };
     fetchPortfolioPrices(); 
-    const interval = setInterval(fetchPortfolioPrices, 15000); 
+    const interval = setInterval(fetchPortfolioPrices, 30000); 
     return () => clearInterval(interval);
   }, [allPortfolioSymbols]);
 
